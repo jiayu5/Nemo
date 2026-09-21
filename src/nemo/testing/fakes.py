@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict
 
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.contracts.model_transport import HttpResponse
-from nemo.core.contracts.types import ModelRequest, ModelResponse, ToolCall
+from nemo.core.contracts.types import Event, ModelRequest, ModelResponse, ToolCall
 
 
 class AddArguments(BaseModel):
@@ -79,3 +79,64 @@ class RecordingTransport:
         if not self._responses:
             raise AssertionError("RecordingTransport ran out of canned responses")
         return self._responses.pop(0)
+
+
+class FakeServerClient:
+    """In-memory HTTP-client substitute for CLI wiring tests."""
+
+    def __init__(self, base_url: str = "http://test"):
+        self.base_url = base_url
+        self.session = {
+            "session_id": "server-session",
+            "workspace": ".",
+            "model": None,
+            "approval_mode": "ask",
+            "message_count": 0,
+        }
+        self.run = {
+            "run_id": "server-run",
+            "session_id": "server-session",
+            "status": "completed",
+            "output": "from server",
+            "error": None,
+        }
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_):
+        return None
+
+    async def list_sessions(self):
+        return [self.session]
+
+    async def get_session(self, session_id):
+        return self.session
+
+    async def create_session(self, *, workspace, model, approval_mode):
+        self.session = {
+            **self.session,
+            "workspace": workspace,
+            "model": model,
+            "approval_mode": approval_mode.value,
+        }
+        return self.session
+
+    async def update_mode(self, session_id, mode):
+        self.session["approval_mode"] = mode.value
+        return self.session
+
+    async def start_run(self, session_id, *, prompt, max_steps):
+        return self.run
+
+    async def get_run(self, run_id):
+        return self.run
+
+    async def cancel_run(self, run_id):
+        return {"status": "accepted"}
+
+    async def answer_approval(self, run_id, request_id, outcome):
+        return {"status": "answered"}
+
+    async def events(self, run_id, *, after=0):
+        yield Event(run_id=run_id, seq=1, step=1, type="run.completed")

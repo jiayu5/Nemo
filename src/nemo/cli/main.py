@@ -21,6 +21,7 @@ from pathlib import Path
 from nemo.bootstrap import build_local_tools, build_model_client
 from nemo.cli.approver import TerminalApprover
 from nemo.cli.render import redact, render_event
+from nemo.cli.server_client import ServerClient, ServerClientError
 from nemo.cli.streams import Streams
 from nemo.cli.transcript import (
     SessionHeader,
@@ -35,7 +36,7 @@ from nemo.core.contracts.errors import NemoError
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.session import Session
-from nemo.core.tools.approval import ApprovalMode, ApprovalPolicy
+from nemo.core.tools.approval import ApprovalMode, ApprovalPolicy, ApprovalRequest
 from nemo.core.tools.registry import ToolRegistry
 from nemo.prompts.local_agent import build_system_prompt
 from nemo.prompts.instructions import load_project_instructions, load_user_instructions
@@ -50,7 +51,7 @@ HELP = """commands:
   :help            show this
   :mode            show the approval mode
   :mode ask|auto|full
-  :exit, :quit     leave (the transcript stays on disk)"""
+  :exit, :quit     leave (the session stays saved)"""
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -67,6 +68,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-steps", type=int, default=10, help="model calls allowed in one turn")
     parser.add_argument("--session", default=None, help="resume the session with this id")
     parser.add_argument("--sessions", action="store_true", help="list known sessions and exit")
+    parser.add_argument(
+        "--server",
+        default="http://127.0.0.1:8765",
+        help="Nemo Server base URL (default: http://127.0.0.1:8765)",
+    )
+    parser.add_argument(
+        "--direct",
+        action="store_true",
+        help="legacy embedded mode without Server; intended for tests and recovery",
+    )
     return parser
 
 
@@ -80,11 +91,14 @@ def main(
     args = build_parser().parse_args(argv)
     output = streams or Streams.from_stdin()
     directory = Path(session_dir or Path.home() / ".nemo" / "sessions").expanduser()
-    if args.sessions:
+    use_server = not args.direct and client_factory is build_model_client
+    if args.sessions and not use_server:
         for path in list_sessions(directory):
             output.write(path.stem)
         return 0
     try:
+        if use_server:
+            return asyncio.run(_serve_remote(args, output))
         return asyncio.run(_serve(args, output, directory, client_factory))
     except KeyboardInterrupt:
         output.write("")
@@ -92,6 +106,139 @@ def main(
     except NemoError as exc:
         output.write(f"{type(exc).__name__}: {exc.public_message}")
         return 2
+    except ServerClientError as exc:
+        output.write(f"ServerClientError: {exc}")
+        output.write("start it with: python -m nemo.server")
+        return 2
+
+
+async def _serve_remote(args, output: Streams) -> int:
+    workspace = Path(args.workspace).expanduser().resolve()
+    if not workspace.is_dir():
+        output.write(f"workspace is not a directory: {workspace}")
+        return 2
+    async with ServerClient(args.server) as client:
+        if args.sessions:
+            for session in await client.list_sessions():
+                output.write(session["session_id"])
+            return 0
+        if args.session:
+            session = await client.get_session(args.session)
+            resumed = True
+            if session["workspace"] != str(workspace):
+                output.write(
+                    f"note: this session belongs to {session['workspace']}; "
+                    f"--workspace {workspace} is ignored"
+                )
+        else:
+            session = await client.create_session(
+                workspace=str(workspace),
+                model=args.model,
+                approval_mode=ApprovalMode(args.mode),
+            )
+            resumed = False
+        mode = ApprovalMode(session["approval_mode"])
+        output.write(
+            f"session  : {session['session_id']}"
+            + (f" (resumed, {session['message_count']} messages)" if resumed else " (new)")
+        )
+        output.write(f"server   : {args.server}")
+        output.write(f"model    : {session['model'] or 'default'}")
+        output.write(f"workspace: {session['workspace']}")
+        output.write(f"mode     : {mode.value} ({MODE_LABELS[mode]})")
+
+        prompt = " ".join(args.prompt).strip()
+        if prompt:
+            return await _remote_turn(client, session["session_id"], prompt, args, output)
+
+        output.write("type :help for commands, :exit to leave")
+        while True:
+            line = await asyncio.to_thread(output.read_line, "nemo> ")
+            if line is None:
+                output.write("")
+                return 0
+            line = line.strip()
+            if not line:
+                continue
+            if line in (":exit", ":quit"):
+                return 0
+            if line == ":help":
+                output.write(HELP)
+                continue
+            if line.startswith(":mode"):
+                mode = await _switch_remote_mode(
+                    client, session["session_id"], mode, line, output
+                )
+                continue
+            if line.startswith(":"):
+                output.write(f"unknown command: {line}")
+                continue
+            await _remote_turn(client, session["session_id"], line, args, output)
+
+
+async def _switch_remote_mode(
+    client: ServerClient,
+    session_id: str,
+    current: ApprovalMode,
+    line: str,
+    output: Streams,
+) -> ApprovalMode:
+    requested = line[len(":mode"):].strip()
+    if not requested:
+        output.write(f"mode     : {current.value} ({MODE_LABELS[current]})")
+        return current
+    try:
+        mode = ApprovalMode(requested)
+    except ValueError:
+        output.write("mode must be one of: ask, auto, full")
+        return current
+    await client.update_mode(session_id, mode)
+    output.write(f"mode     : {mode.value} ({MODE_LABELS[mode]})")
+    return mode
+
+
+async def _remote_turn(
+    client: ServerClient, session_id: str, prompt: str, args, output: Streams
+) -> int:
+    run = await client.start_run(session_id, prompt=prompt, max_steps=args.max_steps)
+    run_id = run["run_id"]
+    loop = asyncio.get_running_loop()
+    installed = False
+
+    def request_cancel() -> None:
+        asyncio.create_task(client.cancel_run(run_id))
+
+    try:
+        loop.add_signal_handler(signal.SIGINT, request_cancel)
+        installed = True
+    except (NotImplementedError, RuntimeError):
+        pass
+    approver = TerminalApprover(output)
+    try:
+        async for event in client.events(run_id):
+            output.write(render_event(event))
+            if event.type == "approval.requested":
+                payload = event.payload
+                outcome = await approver(
+                    ApprovalRequest(
+                        tool_name=payload.get("tool_name", "unknown"),
+                        summary=payload.get("summary", ""),
+                        reason=payload.get("reason", "approval required"),
+                    )
+                )
+                await client.answer_approval(
+                    run_id, payload["request_id"], outcome
+                )
+    finally:
+        if installed:
+            loop.remove_signal_handler(signal.SIGINT)
+    run = await client.get_run(run_id)
+    output.write(f"status  : {run['status']}")
+    if run.get("error"):
+        output.write(f"error   : {redact(run['error'])}")
+    if run.get("output"):
+        output.write(f"\n{redact(run['output'])}\n")
+    return 0 if run["status"] == "completed" else 1
 
 
 async def _serve(args, output: Streams, directory: Path, client_factory) -> int:

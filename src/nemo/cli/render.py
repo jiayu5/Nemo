@@ -15,32 +15,10 @@ resumed session.
 
 from __future__ import annotations
 
-import re
-
 from nemo.core.contracts.types import Event
+from nemo.redaction import MASK, redact
 
-#: Deliberately a word, not punctuation: on a resumed session the model should
-#: read "this value was withheld" rather than mistake a run of asterisks for the
-#: literal content.
-MASK = "[redacted]"
-
-_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
-    (re.compile(r"(?i)(bearer)\s+\S{6,}"), rf"\1 {MASK}"),
-    (
-        re.compile(
-            r"(?i)((?:api[_-]?key|access[_-]?token|auth[_-]?token|secret|password)"
-            r"\s*[:=]\s*)\S{6,}"
-        ),
-        rf"\1{MASK}",
-    ),
-    (re.compile(r"sk-[A-Za-z0-9_\-]{6,}"), f"sk-{MASK}"),
-)
-
-
-def redact(text: str) -> str:
-    for pattern, replacement in _PATTERNS:
-        text = pattern.sub(replacement, text)
-    return text
+__all__ = ["MASK", "redact", "render_event"]
 
 
 def render_event(event: Event) -> str:

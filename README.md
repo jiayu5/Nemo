@@ -1,6 +1,6 @@
 # Nemo
 
-个人 Agent OS 与 Agent 技术实验平台。M1 完成最小单 Agent 内核（Fake Model/Tool 闭环），M2 完成配置驱动的真实模型接入（DeepSeek 等 OpenAI 兼容端点已可用），M3 让 Agent 能在指定目录里读写文件、执行命令。
+个人 Agent OS 与 Agent 技术实验平台。M1 完成最小单 Agent 内核，M2 完成配置驱动的真实模型接入，M3 完成本地工具，M4 完成 Context、CLI 与本地 Server。
 
 ## 运行
 
@@ -25,6 +25,24 @@ python -m pip check
 版本快照不包含完整 Conda 二进制环境及包哈希，不等同于跨平台锁文件。项目不使用 uv，旧 `.venv/` 和 `uv.lock` 已清理。
 
 演示固定执行 `12 + 30`，模型先提出 `add` 调用，再检查 Runtime 回填的 `42`，返回最终回答。这是闭环验证，不具备自然语言计算能力。
+
+## Server 与 CLI
+
+Server 持有 Session、Run、事件、审批与 SQLite 持久化；CLI 默认通过 HTTP/SSE 连接本地 Server。先启动 Server：
+
+```bash
+conda run -n nemo python -m nemo.server
+```
+
+再在另一个终端使用 CLI：
+
+```bash
+conda run -n nemo python -m nemo.cli --workspace . "检查当前项目"
+conda run -n nemo python -m nemo.cli --session <session-id>
+conda run -n nemo python -m nemo.cli --sessions
+```
+
+Server 默认只监听 `127.0.0.1:8765`，数据库为 `~/.nemo/nemo.db`。CLI 保留 `--direct` 作为故障恢复与嵌入式调试入口；该模式仍使用旧 JSONL transcript，不是默认路径。
 
 ## 接入真实模型
 
@@ -80,6 +98,8 @@ conda run -n nemo python examples/deepseek_agent.py --model think "9.11 和 9.9 
 | `edit_file` | 精确字符串替换；匹配不唯一时拒绝执行 | 否 |
 | `list_dir` | 列目录，子目录带 `/` 后缀 | 是 |
 | `run_shell` | `/bin/sh -c` 执行命令，返回退出码、stdout、stderr | 否 |
+| `web_search` | 搜索公开网页并返回标题、URL 与摘要 | 是 |
+| `fetch_url` | 读取 HTTP/HTTPS 静态页面并转为文本 | 是 |
 
 ```bash
 DEMO_WS=$(mktemp -d)
@@ -91,20 +111,20 @@ conda run -n nemo python examples/local_agent.py --workspace "$DEMO_WS" --read-o
 三条必须知道的边界：
 
 - **`workspace` 是约定，不是沙箱。** 路径参数会被限制在 workspace 内（含符号链接指向外部的情况），但 `run_shell` 执行的命令可以访问机器上任何它有权访问的位置。沙箱排在 Phase 3。
-- **没有审批流。** `--read-only` 可以整体拒绝所有写入类工具（`run_shell` 同样被拒，所以无法用 shell 绕过），但做不到「这一次问一下用户」——那需要 M4 的 CLI。在 `--read-only` 之外，模型可以直接改你的文件。
+- **审批不是沙箱。** 默认 Server CLI 支持 `ask` / `auto` / `full`；`auto` 依靠命令形态规则，最坏情况等同 `full`。上方 `examples/local_agent.py` 是旧直连演示，只支持 `--read-only` 整体拒绝写入，不提供逐次审批。
 - **超时与取消会终止整个进程组。** 不会留下后台孤儿进程；`run_shell` 每次都是新进程，`cd` 与环境变量不跨调用保留，必须显式传 `workdir`。
 
 ## 当前边界
 
 - Core 数据契约使用 Pydantic；模型通过异步 `generate` Protocol 接入，`ModelClient` 满足该协议，厂商差异全部关在 `adapters/`。
 - 已实现的协议适配器只有 `openai_compatible`；`openai_responses` 与 `anthropic_messages` 已在契约中预留，尚未实现，配置到未实现协议会给出明确错误。
-- 模型流式（streaming）尚未实现，接口位置已保留，等 Server/UI 有真实消费者时再做。
+- 模型 token 流式（streaming）尚未实现；Server 已通过 SSE 流式传输领域事件，后续 UI 可直接复用。
 - Context Builder 为每次模型调用生成独立消息快照。
 - 工具按顺序执行，使用严格参数校验；未知工具、参数错误、执行错误作为 ToolResult 回填。
 - 每个 Run 拥有独立状态、连续编号的事件和唯一终态；max_steps 按模型调用轮次计数。
 - `cancel=asyncio.Event()` 可取消当前模型/工具并返回 cancelled 结果；对 run Task 调用 `cancel()` 会清理后保留 asyncio.CancelledError 语义。
 - `on_event` 是同步、非阻塞的观测回调；回调异常生成 observer.failed，不改变执行结果。事件不包含工具参数或原始异常。
-- 不自动重试工具与模型；不提供进程隔离、持久化、流式 token、跨协议历史转换或恢复执行。这些在后续里程碑逐步接入。
+- 不自动重试工具与模型；不提供进程隔离、流式 token、跨协议历史转换或崩溃后恢复执行。Server 重启时会把遗留 Run 标记为 `interrupted`，不重放工具。
 - 工具实现须协作响应 asyncio 取消；CPU 阻塞代码或吞掉取消的实现不在当前取消保证内。
 
 实施过程与决策记录见 [docs/README.md](docs/README.md)，架构与后续规划见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)，开发规则见 [AGENTS.md](AGENTS.md)。

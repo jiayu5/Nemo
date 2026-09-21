@@ -3,23 +3,23 @@
 | 项 | 内容 |
 |---|---|
 | 编号 | M4 |
-| 状态 | 进行中（M4a、M4b、M4d 已完成；M4c 未开始） |
-| 完成日期 | M4a：2026-09-17；M4b：2026-09-18；M4d：2026-09-21 |
+| 状态 | 已完成 |
+| 完成日期 | M4a：2026-09-17；M4b：2026-09-18；M4c、M4d：2026-09-21 |
 | 对应阶段 | Phase 1 · Core |
-| 代码范围 | `src/nemo/core/context/`、`src/nemo/core/session.py`、`src/nemo/core/tools/`、`src/nemo/core/runtime/agent.py`、`src/nemo/prompts/`、`src/nemo/cli/`、`src/nemo/bootstrap.py` |
+| 代码范围 | `src/nemo/core/`、`src/nemo/prompts/`、`src/nemo/cli/`、`src/nemo/server/`、`src/nemo/adapters/sqlite.py`、`src/nemo/bootstrap.py` |
 
-M4 是 Phase 1 里最大的一步，按交付顺序拆成三条子线，共用这一个文件：
+M4 是 Phase 1 里最大的一步，按交付顺序拆成四条子线，共用这一个文件：
 
 | 子线 | 内容 | 状态 |
 |---|---|---|
 | **M4a · 上下文组装** | 稳定前缀、每轮注入、`AGENTS.md` 快照 | 已完成 2026-09-17 |
 | **M4b · CLI 与三档审批** | 会话、三档审批、transcript、脱敏 | 已完成 2026-09-18 |
-| **M4c · Server 与 SQLite** | Sessions/Runs API、SSE、持久化 | 未开始 |
-| **M4d · 指令分层** | 用户级 `~/.nemo/AGENTS.md` + 项目级 `<workspace>/AGENTS.md` | 已完成 2026-09-21（晚于 M4c 交付，见下） |
+| **M4c · Server 与 SQLite** | Sessions/Runs API、SSE、持久化 | 已完成 2026-09-21 |
+| **M4d · 指令分层** | 用户级 `~/.nemo/AGENTS.md` + 项目级 `<workspace>/AGENTS.md` | 已完成 2026-09-21（先于 M4c 交付，见下） |
 
 M4d 在 M4c 之前交付：它来自一次复盘——「Nemo 传给模型的 `AGENTS.md` 是从哪来的？」查下来发现只有项目级一层，Nemo 自己的 Agent 指令硬编码在源码里、用户改不了。这是概念缺口而不是排期问题，所以先补。
 
-**为什么合在一个文件**：架构文档 §11 的 M4 是「Server 与 CLI」，而「基础 Context」在 Phase 1 的交付能力里没有自己的编号。三条子线交付的其实是同一件事——**把 Core 变成能天天用的东西**——所以共用一个里程碑编号、共用一份记录，而不是让两个文件都叫 M4。子线的编号只在本文内部使用，不新增文件。
+**为什么合在一个文件**：架构文档 §11 的 M4 是「Server 与 CLI」，而「基础 Context」在 Phase 1 的交付能力里没有自己的编号；M4d 又补齐了上下文说明的用户层。四条子线交付的其实是同一件事——**把 Core 变成能天天用的东西**——所以共用一个里程碑编号、共用一份记录。子线编号只在本文内部使用，不新增文件。
 
 ## 1. 目标与范围
 
@@ -65,11 +65,25 @@ M4d 在 M4c 之前交付：它来自一次复盘——「Nemo 传给模型的 `A
 - workspace 之外的文件读写：仍然硬拒绝，本步不给审批开口子。
 - 多会话并发、TUI、命令补全、历史检索。
 
-### M4c · Server 与 SQLite（未开始）
+### M4c · Server 与 SQLite
 
-**目标**（照架构文档 §11）：Sessions/Runs API、SSE、SQLite 持久化，与 UI 共用同一套 Session/Run 生命周期。
+**目标**：让本地 Server 成为 Session、Run、事件与审批的唯一生命周期所有者，CLI 与后续 UI 共用同一套 HTTP/SSE 契约，同时保持 Core 不依赖 FastAPI 或 SQLite。
 
-进入这一步前必须先决定一件事：**CLI 是否改为经由 Server 访问 Core**。架构文档 §3 的工程建议是「Phase 1 CLI 默认走 Server，与 UI 共用 Session/Run 生命周期」，而 M4b 交付的 CLI 是进程内直连 Runtime + JSONL 存档。维持现状会得到两套任务状态实现——正是那条建议要避免的情况。
+**做**：
+
+- Sessions/Runs HTTP API、取消与审批回传。
+- 领域事件经 SSE 实时输出，以 SQLite 分配的 `seq` 支持 `Last-Event-ID` 重连。
+- SQLite 保存 Session 历史、Run、事件、步骤、工具调用与审批请求。
+- CLI 默认成为 Server 客户端；`--direct` 只保留作故障恢复与嵌入式调试入口。
+- 同一 Session 最多一个活动 Run；重启时遗留 Run 标记为 `interrupted`，不重放工具。
+- 持久化与对外事件统一脱敏，SQLite 文件权限为 600。
+
+**不做**：
+
+- 远程多用户部署、TLS、账号与租户隔离。
+- token 增量流式；M4c 只流式传输已有领域事件。
+- Server 崩溃后的自动续跑与副作用重放。
+- 通过 API 修改密钥或 Provider 配置。
 
 ### M4d · 指令分层
 
@@ -125,7 +139,17 @@ M4d 在 M4c 之前交付：它来自一次复盘——「Nemo 传给模型的 `A
 
 ### M4c · Server 与 SQLite
 
-尚未开始，无交付物。
+| 文件 | 作用 |
+|---|---|
+| `src/nemo/server/app.py` | FastAPI 路由、lifespan、错误映射与 SSE 响应 |
+| `src/nemo/server/service.py` | Session/Run 应用服务、后台任务、取消、审批等待与恢复 |
+| `src/nemo/server/schemas.py` | HTTP 请求/响应模型 |
+| `src/nemo/server/__main__.py` | 本地 Server 启动入口，默认监听 `127.0.0.1:8765` |
+| `src/nemo/adapters/sqlite.py` | SQLite schema、事件排序、历史恢复、物化视图与脱敏 |
+| `src/nemo/cli/server_client.py` | CLI 使用的 HTTP/SSE 客户端 |
+| `src/nemo/cli/main.py` | 默认改走 Server，保留显式 `--direct` |
+| `src/nemo/redaction.py` | CLI 与持久化共用的凭据遮蔽 |
+| `tests/test_server.py` | HTTP、SSE 重连、取消、审批、恢复与密钥测试 |
 
 ### M4d · 指令分层
 
@@ -177,6 +201,19 @@ M4d 在 M4c 之前交付：它来自一次复盘——「Nemo 传给模型的 `A
 | 非交互时 fail closed，不设 `--approve-all` | 没人在场就没有审批；脚本要放行就显式 `--mode full`，不需要第二个开关表达同一件事 | 非交互自动放行：脚本一跑就绕过全部审批 |
 | 默认档取 `ask` | Codex 默认 Auto 是因为它有沙箱兜底；Nemo 没有，默认应取更保守的一档 | 默认 `auto`：首次使用的手感更好，但默认安全性依赖一份启发式规则 |
 
+### M4c · Server 与 SQLite
+
+| 决策 | 理由 | 放弃的替代方案 |
+|---|---|---|
+| CLI 默认通过 Server 访问 Core | Session、Run、审批和事件只有一个所有者，后续 App 可直接复用 | CLI 继续进程内直连：产生两套状态与存储语义 |
+| Server 只监听 loopback | 当前是本地单用户能力，不提前引入远程认证体系 | 监听 `0.0.0.0`：在没有认证与 TLS 时暴露本机执行能力 |
+| SQLite 分配对外事件序号 | Runtime 外还会产生审批与恢复事件，只有持久化层看得到完整顺序 | 沿用 Runtime `seq`：不同事件源会冲突，SSE 无法可靠续传 |
+| 同一 Session 只允许一个活动 Run | 两个并发 Run 对同一历史的追加顺序没有稳定定义 | 允许并发后按完成顺序合并：对话因时序变化而不可复现 |
+| SSE 断开不取消 Run | 客户端可以重连，取消必须是显式操作 | 用连接生命周期绑定 Run：网络闪断会意外中止任务 |
+| 重启后标记 `interrupted`，不自动续跑 | 无法判断中断前的工具副作用是否已经发生，自动重放可能重复修改 | 从最后事件恢复：事件不是可重放事务日志 |
+| 保留显式 `--direct` | Server 故障时仍有恢复与嵌入式调试入口 | 删除直连路径：Server 本身出问题时无法使用 Nemo 排查 Nemo |
+| 对结构化值递归脱敏 | 只改字符串叶子，不会破坏 JSON 语法和数据类型 | 对序列化后的整段 JSON 做正则：可能吞掉引号或括号，使历史不可恢复 |
+
 ### M4d · 指令分层
 
 | 决策 | 理由 | 放弃的替代方案 |
@@ -216,7 +253,13 @@ M4d 在 M4c 之前交付：它来自一次复盘——「Nemo 传给模型的 `A
 
 ### M4c · Server 与 SQLite
 
-未开始。
+1. **先定边界**：确认 CLI 默认走 Server，避免 CLI 与 App 各自维护一套 Session/Run 状态；Core 只增加 `run_id` 注入与关闭模型传输所需的最小接缝。
+2. **先写持久化契约**：SQLite 建立 `sessions`、`messages`、`runs`、`events`、`steps`、`tool_calls`、`approval_requests` 七张表；用部分唯一索引强制每个 Session 只有一个活动 Run。
+3. **统一事件顺序**：Runtime 事件、审批事件和恢复事件都由 Repository 重新分配单调递增的 `seq`，该序号同时作为 SSE `id` 和重连游标。
+4. **应用服务接线**：`AgentService` 负责装配 Runtime、启动后台 Run、传播取消、等待审批与写终态；审批超时按拒绝处理。
+5. **重启语义**：lifespan 启动时把数据库里 `queued`/`running` 的 Run 改为 `interrupted` 并追加终态事件，不自动重放可能已有副作用的工具。
+6. **CLI 迁移**：增加 `ServerClient`，一次性任务和 REPL 都经 HTTP 创建/恢复 Session、经 SSE 渲染事件和回传审批；`--direct` 沿用 M4b 的 JSONL 路径。
+7. **脱敏修正**：持久化最初对完整 JSON 字符串做正则遮蔽，审查发现可能吞掉 JSON 的引号或括号；改为递归遍历结构、只遮蔽字符串叶子，并用可重新载入的消息测试锁定。
 
 ### M4d · 指令分层
 
@@ -344,7 +387,42 @@ status  : completed
 
 ### M4c · Server 与 SQLite
 
-未开始，无证据。
+**依赖与测试**（全量 211 个用例通过，其中 6 个为 Server 集成测试，另有 CLI 默认走 Server 的契约测试）：
+
+```bash
+conda run -n nemo python -m pip install -r requirements-lock.txt -e .
+conda run -n nemo python -m pip check
+conda run -n nemo python -m unittest discover -s tests -v
+```
+
+```text
+No broken requirements found.
+Ran 211 tests in 3.750s
+
+OK
+```
+
+**入口验证**：
+
+```bash
+conda run -n nemo python -m nemo.server --help
+conda run -n nemo python -m nemo.cli --help
+```
+
+两条命令均正常退出；CLI 帮助中可见 `--server` 与 `--direct`。
+
+**覆盖情况**：
+
+| 验收点 | 对应验证 |
+|---|---|
+| HTTP 创建 Session/Run 并查询历史 | `test_http_session_run_and_sse_reconnect` |
+| SSE 序号连续且重连不重复 | `test_http_session_run_and_sse_reconnect` |
+| 同一 Session 单活动 Run、取消传播 | `test_one_active_run_per_session_and_cancel` |
+| 审批持久化、回传并解锁工具 | `test_approval_round_trip_is_persisted_and_unblocks_tool` |
+| 重启不重放，遗留 Run 变 `interrupted` | `test_startup_marks_abandoned_runs_interrupted` |
+| 失败终态与终态事件一起持久化 | `test_failed_run_persists_its_terminal_event` |
+| SQLite 与事件不含密钥、文件为 600 | `test_persisted_payloads_are_redacted` |
+| CLI 默认使用 Server 契约 | `test_default_cli_uses_server_contract` |
 
 ### M4d · 指令分层
 
@@ -420,8 +498,11 @@ DEMO-RULE-OK
 - **向上查找未实现**：只读 workspace 根一层。人常在仓库子目录里工作时找不到仓库根的约定；Codex 与 Claude Code 都会带上工作目录以上的层级。已记入 [TODO.md](../TODO.md) 的 T1，卡在「走到仓库根还是文件系统根」这个决定上。
 - **2026-09-21 补的两处**（原实现的问题，非设计取舍）：① transcript 载入容忍损坏行——原实现遇到被杀的进程留下的半行 JSON 会让整个会话读不出来；现在跳过并计数，恢复时明确报告。② 掩码由 `***` 改为 `[redacted]` 且保留形状（`Bearer [redacted]`、`sk-[redacted]`），让恢复会话的模型读得出「这里有个值被扣下了」，而不是把 `***` 当成字面内容。
 
-### M4c 的入口
+### M4c · Server 与 SQLite 的遗留
 
-- 先定 CLI 与 Server 的关系（见 §1 M4c）：CLI 改为 HTTP 客户端，还是维持进程内直连 + 两套存储。架构文档 §3 建议前者。
-- 再按 Sessions/Runs 的真实形状定 SQLite schema；`Session` 与 `Run` 的边界已经在 M4b 里跑出结果，可以直接照搬。
-- `src/nemo/cli/` 的 `Streams` 与 `Approver` 是可复用接缝；SSE 事件流应复用同一套事件类型，不再另起一套说法。
+- Server 是本地单用户进程，只监听 loopback 且没有认证；不能直接暴露到局域网或公网。
+- SSE 传输的是领域事件，不是模型 token 增量；模型适配器仍使用非流式响应。
+- 重启恢复只把 Run 标记为 `interrupted`，不会自动续跑；这是避免重复副作用的刻意选择。
+- SQLite 是脱敏后的运行记录，不能用来还原原始密钥；Session 恢复时模型看到的也是脱敏历史。
+- CLI 的 `--direct` 仍保留一套 JSONL 存档，但它是显式恢复通道，不再是默认生命周期。
+- 下一步可进入 M5 Desktop Shell，让 App 直接复用现有 HTTP/SSE 协议，不再新增第三套执行路径。

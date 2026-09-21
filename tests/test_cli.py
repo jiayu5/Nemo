@@ -14,7 +14,7 @@ from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.types import Message, ModelResponse, ToolCall
 from nemo.core.session import Session
 from nemo.core.tools.approval import ApprovalOutcome
-from nemo.testing.fakes import FakeModel
+from nemo.testing.fakes import FakeModel, FakeServerClient
 
 SECRET = "sk-live-0123456789abcdef"
 
@@ -234,6 +234,18 @@ class CliTests(unittest.TestCase):
 
     def transcripts(self):
         return sorted(self.sessions.glob("*.jsonl"))
+
+    def test_default_cli_uses_the_server_contract(self):
+        written = []
+        streams = Streams.scripted([], written=written, is_tty=False)
+        with patch("nemo.cli.main.ServerClient", FakeServerClient):
+            code = main(self.base_args("hello"), streams=streams)
+
+        output = "\n".join(written)
+        self.assertEqual(code, 0)
+        self.assertIn("server   : http://127.0.0.1:8765", output)
+        self.assertIn("from server", output)
+        self.assertEqual(self.transcripts(), [])
 
     def test_one_shot_turn_writes_a_transcript(self):
         code, output, _ = self.run_cli(

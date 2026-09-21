@@ -6,8 +6,9 @@ Nemo 是个人 Agent OS 与 Agent 技术实验平台。基础设施使用成熟�
 
 ## 当前阶段与目录约定
 
-- M1（Agent Runtime 最小闭环）、M2a（配置驱动的真实模型接入、`openai_compatible` 协议、token 统计）、M3a（系统提示、执行上下文与 Policy、五个本地工具）已完成；M4 进行中，其中 M4a（上下文组装：稳定前缀、每轮注入、`AGENTS.md` 快照）、M4b（CLI 与三档审批、会话、transcript）、M4d（指令分层：用户级与项目级 `AGENTS.md`）已完成，M4c（Server 的 Session/Run API + SSE、SQLite 持久化）未开始。子线共用 [docs/milestones/M4-context-cli-server.md](docs/milestones/M4-context-cli-server.md) 一个文件。
+- M1（Agent Runtime 最小闭环）、M2a（配置驱动的真实模型接入、`openai_compatible` 协议、token 统计）、M3（本地执行）与 M4（Context、CLI、Server）已完成。M4 包含上下文组装、CLI 与三档审批、指令分层，以及 Server 的 Session/Run API、SSE 与 SQLite 持久化；子线共用 [docs/milestones/M4-context-cli-server.md](docs/milestones/M4-context-cli-server.md) 一个文件。
 - `src/nemo/core/session.py` 只保存会话状态（会话标识、消息历史、workspace），不做文件 I/O；`src/nemo/cli/` 保存命令行客户端（参数解析、REPL、审批交互、事件渲染、JSONL transcript 与脱敏）；`src/nemo/core/tools/approval.py` 与 `command_rules.py` 保存审批策略与 shell 命令形态判定。审批只做策略，core 不做 I/O。
+- `src/nemo/server/` 保存本地 FastAPI 宿主、Session/Run 应用服务、SSE 与远程审批协议；Server 只编排 Core，不实现第二套 Agent Loop。SQLite 实现位于 `src/nemo/adapters/sqlite.py`，不进入 Core。
 - 说明文件分两层，都是 `AGENTS.md`，靠位置区分作用域：用户级 `~/.nemo/AGENTS.md`（跨项目的 Agent 行为偏好）与项目级 `<workspace>/AGENTS.md`（该项目自己的约定）。两者都只做**追加**，由 `src/nemo/prompts/instructions.py` 读取（core 之外），会话开始时各快照一次；任何说明文件都不能放宽路径检查与审批，那是代码强制的边界。
 - CLI 的三档审批：`ask`（默认，改动前确认）、`auto`（只确认识别得出的危险）、`full`（不确认）。判定规则是人工维护的表，不是沙箱；`auto` 的最坏情况等同 `full`，不得把它当安全边界。
 - `src/nemo/core/contracts/` 保存 Pydantic 数据模型与 Protocol；`runtime/` 保存 Loop；`context/` 保存基础上下文组装；`tools/` 保存注册和执行边界。

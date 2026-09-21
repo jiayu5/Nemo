@@ -98,6 +98,7 @@ class RunStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
     LIMIT_REACHED = "limit_reached"
 
 

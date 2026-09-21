@@ -21,7 +21,8 @@ class AgentRuntime:
     async def run(self, prompt: str, *, max_steps: int = 10,
                   cancel: asyncio.Event | None = None,
                   on_event: Callable[[Event], None] | None = None,
-                  history: Sequence[Message] = ()) -> RunResult:
+                  history: Sequence[Message] = (),
+                  run_id: str | None = None) -> RunResult:
         if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
             raise ValueError("max_steps must be a positive integer")
         # ``history`` is copied, never adopted: a run does not mutate the
@@ -29,6 +30,7 @@ class AgentRuntime:
         # snapshot. Step numbering restarts at 1 -- ``max_steps`` guards one
         # turn, not the whole session.
         state = AgentState(
+            **({"run_id": run_id} if run_id is not None else {}),
             messages=[m.model_copy(deep=True) for m in history]
             + [Message(role="user", content=prompt)]
         )

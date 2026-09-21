@@ -418,11 +418,13 @@ Phase 1 推荐分解为以下里程碑：
 
 真实 Provider 冒烟测试需要用户已有配置；常规回归优先使用 Fake Model 与脱敏协议 fixture，不依赖线上 API 或真实密钥。
 
-各里程碑的实施过程、关键决策与验证证据记录在 [docs/milestones/](docs/milestones/)。分工是：本文写「要做成什么」，里程碑记录写「已经做成了什么」。已完成部分见 [M1](docs/milestones/M1-agent-runtime.md)、[M2](docs/milestones/M2-model-system.md)、[M3](docs/milestones/M3-local-execution.md)、[M4](docs/milestones/M4-context-cli-server.md)（其中 M4a、M4b 已完成，M4c 未开始）。
+各里程碑的实施过程、关键决策与验证证据记录在 [docs/milestones/](docs/milestones/)。分工是：本文写「要做成什么」，里程碑记录写「已经做成了什么」。已完成部分见 [M1](docs/milestones/M1-agent-runtime.md)、[M2](docs/milestones/M2-model-system.md)、[M3](docs/milestones/M3-local-execution.md)、[M4](docs/milestones/M4-context-cli-server.md)。
 
-**M4 拆成三条子线（2026-09-18 确定）**：M4 原定义是「Server 与 CLI」，但 Phase 1 交付能力里的「基础 Context」没有自己的编号，实际交付时又必须先做。为保持「一个里程碑一个文件、编号与本文一致」，M4 内部拆为三条子线并写在同一份记录里：**M4a 上下文组装**、**M4b CLI 与三档审批**、**M4c Server 与 SQLite**。子线编号只在记录内部使用，不新增里程碑编号。
+**M4 拆成四条子线（2026-09-18 确定，2026-09-21 补 M4d）**：M4 原定义是「Server 与 CLI」，但 Phase 1 交付能力里的「基础 Context」没有自己的编号，实际交付时又必须先做。为保持「一个里程碑一个文件、编号与本文一致」，M4 内部拆为 **M4a 上下文组装**、**M4b CLI 与三档审批**、**M4c Server 与 SQLite**、**M4d 指令分层**，写在同一份记录里。子线编号只在记录内部使用，不新增里程碑编号。
 
 **M4b · CLI 与三档审批（2026-09-18 实现）**：审批不是一个「要不要问」的开关，而是三档策略：`ask`（改动前确认，默认）、`auto`（只确认识别得出的危险）、`full`（不确认）。判定依据全部是机械事实——工具自报的 `read_only`、shell 命令原文的形态分类、参数里的路径是否越出 workspace——**不让模型给自己的工作打分**。必须说清楚的是：Codex 的 Auto 可信是因为底下有沙箱，Nemo 的沙箱排在 Phase 3，所以 `auto` 只是减少打扰的启发式，最坏情况等同 `full`，不是安全边界。会话与运行分成两层：`Session` 持有跨轮历史、只存状态不做 I/O，`Run` 仍然一次一轮、事件与步数互不干扰。CLI 用 JSONL 存 transcript（600 权限、写入前脱敏并标记），**SQLite 与 Server 留到 M4c**——先用 CLI 把会话手感跑出来，数据模型才有依据，而 schema 变更在项目规范里是红线。设计见 [docs/design/cli-and-approval.md](docs/design/cli-and-approval.md)。
+
+**M4c · Server 与 SQLite（2026-09-21 实现）**：本地 FastAPI Server 成为 Session、Run、事件与审批的唯一生命周期所有者，CLI 默认通过 HTTP + SSE 使用它；Core Runtime 仍保持框架无关。SQLite 保存历史、事件与物化的步骤/工具调用，数据库事件序号承担 SSE 重连游标；同一 Session 只允许一个活动 Run，重启后遗留 Run 标记为 `interrupted` 而不自动重放。`--direct` 仅保留作故障恢复与嵌入式调试入口。设计见 [docs/design/server-and-persistence.md](docs/design/server-and-persistence.md)。
 
 **M3 工具集与执行模型（2026-09-17 确定）**：工具采用细粒度拆分而不是「一个文件系统工具带操作参数」，与 Claude Code（`Read`/`Write`/`Edit`/`Bash` 各自独立）一致；Codex 采用「Shell + apply_patch」的粗粒度路线，但依赖沙箱与审批系统补足权限粒度，而 Nemo 的沙箱排在 Phase 3。在没有沙箱的前提下，工具粒度本身就是唯一可用的权限阀，因此拆分是必然选择。Phase 1 工具集固定为 `read_file`、`write_file`、`edit_file`、`list_dir`、`run_shell` 五个，不含独立的 Python 工具（可用 `run_shell` 执行）。Shell 采用「每次调用独立进程 + 显式 `workdir`」，不使用常驻会话：常驻会话会让 `cd`、环境变量、后台任务等状态跨越调用，破坏「每个 Run 独立、结果可复现」的前提；超时与取消必须终止整个进程组，而不只是父进程。常驻会话的接口位置保留，等 M4/M5 出现真实交互需求时再按需加入。
 

@@ -41,6 +41,13 @@ class ModelClient:
             raise self._adapter.decode_error(response, self._secret)
         return self._adapter.decode_response(response, self._secret)
 
+    async def aclose(self) -> None:
+        """Close an owned transport when the outer host ends this client."""
+
+        closer = getattr(self._transport, "aclose", None)
+        if closer is not None:
+            await closer()
+
     def _require_capabilities(self, request: ModelRequest) -> None:
         if request.tools and "tool_calling" not in self.resolved.capabilities:
             raise CapabilityError(
