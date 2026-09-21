@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
+import Markdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { api, formatDuration, subscribeToRun } from "./api";
 import type {
   ApprovalMode,
@@ -211,10 +213,18 @@ export default function App() {
   return (
     <div className="app-shell">
       <header className="topbar">
-        <div className="brand-mark">N</div>
-        <div>
-          <h1>Nemo</h1>
-          <p>Local agent workspace</p>
+        <div className="brand-block">
+          <div className="brand-mark">N</div>
+          <div>
+            <h1>Nemo</h1>
+            <p>Local agent runtime</p>
+          </div>
+        </div>
+        <div className="topbar-context">
+          <span className="context-label">Current workspace</span>
+          <span className="context-value">
+            {selected?.workspace.split("/").filter(Boolean).at(-1) ?? "No session"}
+          </span>
         </div>
         <span className={`server-pill ${serverOnline ? "online" : "offline"}`}>
           <i /> {serverOnline ? "Server online" : "Server offline"}
@@ -226,17 +236,18 @@ export default function App() {
       <main className="workspace-grid">
         <aside className="sessions-panel panel">
           <div className="panel-heading">
-            <span>Sessions</span><b>{sessions.length}</b>
+            <div><span className="section-note">Local workspaces</span><strong>Recent sessions</strong></div>
+            <b>{sessions.length}</b>
           </div>
           <form className="new-session" onSubmit={createSession}>
-            <label htmlFor="workspace">Workspace</label>
+            <label htmlFor="workspace">Open a workspace</label>
             <input
               id="workspace"
               value={workspace}
               onChange={(event) => setWorkspace(event.target.value)}
               placeholder="/path/to/project"
             />
-            <button type="submit">New session</button>
+            <button type="submit" aria-label="New session"><span>＋</span> New session</button>
           </form>
           <div className="session-list">
             {sessions.map((session) => (
@@ -260,7 +271,7 @@ export default function App() {
         <section className="conversation-panel panel">
           <div className="panel-heading conversation-title">
             <div>
-              <span>{selected ? "Conversation" : "No session selected"}</span>
+              <span>{selected ? "New task" : "No session selected"}</span>
               <small>{selected?.workspace ?? "Choose a workspace on the left"}</small>
             </div>
             {activeRun && (
@@ -277,20 +288,27 @@ export default function App() {
                 {message.role === "tool" ? (
                   <pre>{JSON.stringify(message.tool_result, null, 2)}</pre>
                 ) : (
-                  <p>
-                    {message.content ||
-                      (message.tool_calls.length
-                        ? `Requested: ${message.tool_calls.map((call) => call.name).join(", ")}`
-                        : "")}
-                  </p>
+                  <div className="message-content">
+                    <Markdown remarkPlugins={[remarkGfm]}>
+                      {message.content ||
+                        (message.tool_calls.length
+                          ? `Requested: ${message.tool_calls.map((call) => call.name).join(", ")}`
+                          : "")}
+                    </Markdown>
+                  </div>
                 )}
               </article>
             ))}
             {!messages.length && selected && (
               <div className="conversation-empty">
-                <span>◌</span>
-                <h2>What should Nemo work on?</h2>
-                <p>Runs stay local, observable, and attached to this workspace.</p>
+                <div className="empty-orb"><span>N</span></div>
+                <p className="empty-kicker">Runtime ready</p>
+                <h2>What should we work on?</h2>
+                <p className="empty-copy">Ask Nemo to inspect code, make a change, or explain this workspace.</p>
+                <div className="suggestion-row">
+                  <button type="button" onClick={() => setPrompt("Summarize this project and its architecture")}>Summarize project</button>
+                  <button type="button" onClick={() => setPrompt("Find the highest-priority improvement to make next")}>Suggest next step</button>
+                </div>
               </div>
             )}
             <div ref={messagesEndRef} />
@@ -309,21 +327,30 @@ export default function App() {
           )}
 
           <form className="composer" onSubmit={submitPrompt}>
-            <textarea
-              value={prompt}
-              onChange={(event) => setPrompt(event.target.value)}
-              placeholder={selected ? "Ask Nemo to inspect or change this workspace…" : "Create a session first"}
-              disabled={!selected || Boolean(activeRun)}
-              rows={3}
-            />
-            <button type="submit" disabled={!selected || !prompt.trim() || Boolean(activeRun)}>
-              {activeRun ? "Running…" : "Run"}
+            <div className="composer-surface">
+              <textarea
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder={selected ? "Describe a task for Nemo…" : "Create a session first"}
+                disabled={!selected || Boolean(activeRun)}
+                rows={3}
+              />
+              <div className="composer-meta">
+                <span>↵ Run task</span>
+                <span>Local workspace</span>
+              </div>
+            </div>
+            <button type="submit" aria-label="Run task" disabled={!selected || !prompt.trim() || Boolean(activeRun)}>
+              {activeRun ? <span className="running-spinner" /> : "↑"}
             </button>
           </form>
         </section>
 
         <aside className="trace-panel panel">
-          <div className="panel-heading"><span>Run & Trace</span></div>
+          <div className="panel-heading inspector-heading">
+            <div><span className="section-note">Execution details</span><strong>Run activity</strong></div>
+            <span className="live-indicator">Live</span>
+          </div>
           <div className="run-list">
             {runs.map((run) => (
               <button key={run.run_id} onClick={() => void selectRun(run)}>
@@ -360,7 +387,7 @@ export default function App() {
             {!events.length && <p className="empty-note">Run events will appear here.</p>}
           </div>
           <section className="providers-card">
-            <h3>Providers</h3>
+            <div className="providers-title"><h3>Connections</h3><span>{providers.length}</span></div>
             {providers.map((provider) => (
               <div key={provider.provider_id}>
                 <span>{provider.provider_id}</span>
@@ -374,7 +401,7 @@ export default function App() {
       </main>
 
       <footer className="statusbar">
-        <span><b>Workspace</b> {selected?.workspace ?? "—"}</span>
+        <span className="workspace-status"><i /><b>Workspace</b> {selected?.workspace ?? "—"}</span>
         <label>
           <b>Model</b>
           <select
