@@ -4,16 +4,23 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 from uuid import uuid4
 
 from nemo.adapters.sqlite import ActiveRunError, SQLiteRepository, TERMINAL_STATUSES
 from nemo.bootstrap import build_local_tools, build_model_client
+from nemo.config.loader import load_config
+from nemo.config.secrets import SecretLoader
 from nemo.core.context.builder import ContextBuilder
 from nemo.core.contracts.errors import NemoError
 from nemo.core.contracts.tools import ExecutionContext
-from nemo.core.contracts.types import Event
+from nemo.core.contracts.types import Event, Message, ModelRequest
+from nemo.core.models.registry import ModelRegistry
+from nemo.core.models.resolver import ModelResolver
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.session import new_session_id
 from nemo.core.tools.approval import (
@@ -28,6 +35,7 @@ from nemo.prompts.local_agent import build_system_prompt
 from nemo.server.errors import (
     ApprovalConflictError,
     ApprovalNotFoundError,
+    ProviderNotFoundError,
     RunNotFoundError,
     SessionNotFoundError,
 )
@@ -41,11 +49,15 @@ class AgentService:
         client_factory: Callable[..., Any] = build_model_client,
         tools_factory: Callable[[], tuple[Any, ...]] = build_local_tools,
         approval_timeout_seconds: float = 300.0,
+        config_loader: Callable[[], Any] = load_config,
+        secret_loader_factory: Callable[[], Any] = SecretLoader,
     ) -> None:
         self.repository = repository
         self._client_factory = client_factory
         self._tools_factory = tools_factory
         self._approval_timeout = approval_timeout_seconds
+        self._config_loader = config_loader
+        self._secret_loader_factory = secret_loader_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._cancel: dict[str, asyncio.Event] = {}
         self._approval_waiters: dict[str, asyncio.Future[ApprovalOutcome]] = {}
@@ -73,6 +85,8 @@ class AgentService:
         path = Path(workspace).expanduser().resolve()
         if not path.is_dir():
             raise ValueError("workspace must be an existing directory")
+        if model is not None:
+            ModelRegistry(self._config_loader()).resolve_name(model)
         return self._public_session(
             self.repository.create_session(
                 session_id=new_session_id(),
@@ -102,12 +116,117 @@ class AgentService:
     ) -> dict[str, Any]:
         if self.repository.get_session(session_id) is None:
             raise SessionNotFoundError(session_id)
+        if model is not None:
+            ModelRegistry(self._config_loader()).resolve_name(model)
         row = self.repository.update_session(
             session_id,
             model=model,
             approval_mode=approval_mode.value if approval_mode is not None else None,
         )
         return self._public_session(row)  # type: ignore[arg-type]
+
+    def set_session_model(self, session_id: str, model: str) -> dict[str, Any]:
+        if self.repository.get_session(session_id) is None:
+            raise SessionNotFoundError(session_id)
+        ModelRegistry(self._config_loader()).resolve_name(model)
+        row = self.repository.update_session(session_id, model=model)
+        return self._public_session(row)  # type: ignore[arg-type]
+
+    def session_messages(self, session_id: str) -> tuple[Message, ...]:
+        if self.repository.get_session(session_id) is None:
+            raise SessionNotFoundError(session_id)
+        return self.repository.messages(session_id)
+
+    def session_runs(self, session_id: str) -> list[dict[str, Any]]:
+        if self.repository.get_session(session_id) is None:
+            raise SessionNotFoundError(session_id)
+        return [self._public_run(row) for row in self.repository.list_runs(session_id)]
+
+    def models(self) -> list[dict[str, Any]]:
+        config = self._config_loader()
+        registry = ModelRegistry(config)
+        resolver = ModelResolver(registry)
+        selections: list[tuple[str, str]] = []
+        selections.extend((name, "profile") for name in config.profiles)
+        selections.extend(
+            (name, "alias") for name in config.aliases if name not in config.profiles
+        )
+        selections.extend(
+            (name, "model")
+            for name in config.models
+            if name not in config.profiles and name not in config.aliases
+        )
+        result = []
+        for selection, kind in selections:
+            resolved = resolver.resolve(run_override=selection)
+            result.append(
+                {
+                    "selection": selection,
+                    "kind": kind,
+                    "model_name": resolved.model_name,
+                    "model_id": resolved.model_id,
+                    "provider_id": config.models[resolved.model_name].provider,
+                    "protocol": resolved.protocol,
+                    "capabilities": sorted(resolved.capabilities),
+                    "is_default": selection == config.default,
+                }
+            )
+        return result
+
+    def providers(self) -> list[dict[str, Any]]:
+        config = self._config_loader()
+        secret_loader = self._secret_loader_factory()
+        return [
+            {
+                "provider_id": provider_id,
+                "protocol": provider.protocol,
+                "base_url": self._public_base_url(provider.base_url),
+                "api_key_env": provider.api_key_env,
+                "secret_configured": secret_loader.source(provider.api_key_env) is not None,
+                "timeout_seconds": provider.timeout_seconds,
+                "models": sorted(
+                    name
+                    for name, model in config.models.items()
+                    if model.provider == provider_id
+                ),
+            }
+            for provider_id, provider in config.providers.items()
+        ]
+
+    async def test_provider(
+        self, provider_id: str, selection: str | None = None
+    ) -> dict[str, Any]:
+        config = self._config_loader()
+        if provider_id not in config.providers:
+            raise ProviderNotFoundError(provider_id)
+        registry = ModelRegistry(config)
+        resolver = ModelResolver(registry)
+        chosen = selection or self._selection_for_provider(provider_id, registry)
+        resolved = resolver.resolve(run_override=chosen)
+        if registry.model(resolved.model_name).provider != provider_id:
+            raise ValueError("selected model does not belong to this provider")
+        client = self._client_factory(run_override=chosen)
+        started = perf_counter()
+        try:
+            await client.generate(
+                ModelRequest(
+                    messages=(Message(role="user", content="Reply with OK."),),
+                    tools=(),
+                )
+            )
+        finally:
+            closer = getattr(client, "aclose", None)
+            if closer is not None:
+                await closer()
+        return {
+            "status": "ok",
+            "provider_id": provider_id,
+            "selection": chosen,
+            "model_name": resolved.model_name,
+            "model_id": resolved.model_id,
+            "protocol": resolved.protocol,
+            "latency_ms": round((perf_counter() - started) * 1000, 3),
+        }
 
     def start_run(self, session_id: str, *, prompt: str, max_steps: int) -> dict[str, Any]:
         session = self.repository.get_session(session_id)
@@ -157,6 +276,52 @@ class AgentService:
             raise RunNotFoundError(run_id)
         return self.repository.events_after(run_id, seq)
 
+    def trace(self, run_id: str) -> dict[str, Any]:
+        run = self.repository.get_run(run_id)
+        if run is None:
+            raise RunNotFoundError(run_id)
+        events = self.repository.events_after(run_id, 0)
+        steps = [
+            {
+                "step": row["step"],
+                "started_at": row["started_at"],
+                "finished_at": row["finished_at"],
+                "duration_ms": self._duration_ms(
+                    row["started_at"], row["finished_at"]
+                ),
+            }
+            for row in self.repository.steps(run_id)
+        ]
+        tool_calls = [
+            {
+                key: row[key]
+                for key in (
+                    "tool_call_id",
+                    "step",
+                    "name",
+                    "summary",
+                    "status",
+                    "error_code",
+                    "started_at",
+                    "finished_at",
+                )
+            }
+            | {
+                "duration_ms": self._duration_ms(
+                    row["started_at"], row["finished_at"]
+                )
+            }
+            for row in self.repository.tool_calls(run_id)
+        ]
+        return {
+            "run": self._public_run(run),
+            "duration_ms": self._duration_ms(run.get("started_at"), run.get("finished_at")),
+            "steps": steps,
+            "model_calls": self._model_calls(events),
+            "tool_calls": tool_calls,
+            "events": events,
+        }
+
     def answer_approval(
         self, run_id: str, request_id: str, outcome: ApprovalOutcome
     ) -> None:
@@ -188,6 +353,17 @@ class AgentService:
         try:
             self.repository.set_run_running(run_id)
             client = self._client_factory(run_override=session["model"])
+            resolved = getattr(client, "resolved", None)
+            if resolved is not None:
+                provider = self._config_loader().models[resolved.model_name].provider
+                self.repository.set_run_model(
+                    run_id,
+                    selection=resolved.selection,
+                    model_name=resolved.model_name,
+                    model_id=resolved.model_id,
+                    protocol=resolved.protocol,
+                    provider=provider,
+                )
             tools = self._tools_factory()
             approver = self._approver(run_id)
             policy = ApprovalPolicy(ApprovalMode(session["approval_mode"]), approver=approver)
@@ -310,5 +486,78 @@ class AgentService:
                 "created_at",
                 "started_at",
                 "finished_at",
+                "model_selection",
+                "model_name",
+                "model_id",
+                "model_protocol",
+                "model_provider",
             )
         }
+
+    @staticmethod
+    def _selection_for_provider(provider_id: str, registry: ModelRegistry) -> str:
+        config = registry.config
+        default_name, _ = registry.resolve_name(config.default)
+        if registry.model(default_name).provider == provider_id:
+            return config.default
+        candidates = sorted(
+            name for name, model in config.models.items() if model.provider == provider_id
+        )
+        if not candidates:
+            raise ValueError("provider has no configured model")
+        return candidates[0]
+
+    @staticmethod
+    def _duration_ms(started_at: str | None, finished_at: str | None) -> float | None:
+        if not started_at or not finished_at:
+            return None
+        delta = datetime.fromisoformat(finished_at) - datetime.fromisoformat(started_at)
+        return round(delta.total_seconds() * 1000, 3)
+
+    @staticmethod
+    def _public_base_url(value: str) -> str:
+        parsed = urlsplit(value)
+        host = parsed.hostname or ""
+        if ":" in host and not host.startswith("["):
+            host = f"[{host}]"
+        if parsed.port is not None:
+            host = f"{host}:{parsed.port}"
+        return urlunsplit((parsed.scheme, host, parsed.path, "", ""))
+
+    @classmethod
+    def _model_calls(cls, events: list[Event]) -> list[dict[str, Any]]:
+        pending: dict[int, Event] = {}
+        calls: list[dict[str, Any]] = []
+        for event in events:
+            if event.type == "model.started":
+                pending[event.step] = event
+            elif event.type == "model.completed" and event.step in pending:
+                started = pending.pop(event.step)
+                calls.append(
+                    {
+                        "step": event.step,
+                        "started_at": started.timestamp.isoformat(),
+                        "finished_at": event.timestamp.isoformat(),
+                        "duration_ms": round(
+                            (event.timestamp - started.timestamp).total_seconds() * 1000,
+                            3,
+                        ),
+                        "status": "completed",
+                        "prompt_tokens": event.payload.get("prompt_tokens"),
+                        "cached_prompt_tokens": event.payload.get(
+                            "cached_prompt_tokens"
+                        ),
+                        "completion_tokens": event.payload.get("completion_tokens"),
+                    }
+                )
+        for step, started in sorted(pending.items()):
+            calls.append(
+                {
+                    "step": step,
+                    "started_at": started.timestamp.isoformat(),
+                    "finished_at": None,
+                    "duration_ms": None,
+                    "status": "incomplete",
+                }
+            )
+        return sorted(calls, key=lambda item: item["step"])

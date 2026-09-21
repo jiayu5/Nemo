@@ -44,6 +44,15 @@ conda run -n nemo python -m nemo.cli --sessions
 
 Server 默认只监听 `127.0.0.1:8765`，数据库为 `~/.nemo/nemo.db`。CLI 保留 `--direct` 作为故障恢复与嵌入式调试入口；该模式仍使用旧 JSONL transcript，不是默认路径。
 
+开发态 React UI 需要保持 Server 运行，再开一个终端：
+
+```bash
+npm --prefix apps/ui ci
+npm --prefix apps/ui run dev
+```
+
+浏览器打开 `http://127.0.0.1:5173`。Vite 把相对路径 `/api` 代理到本地 Server；UI 不直接读取 SQLite、配置文件或密钥。前端验证命令为 `npm --prefix apps/ui test -- --run`、`npm --prefix apps/ui run typecheck` 与 `npm --prefix apps/ui run build`。
+
 ## 接入真实模型
 
 路由配置与密钥放在 `~/.nemo/`，不进仓库：

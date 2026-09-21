@@ -21,13 +21,15 @@ docs/
 ├── design/
 │   ├── context-assembly.md        M4 上下文组装设计（已实现）
 │   ├── cli-and-approval.md        M4 CLI 与三档审批设计（已实现）
-│   └── server-and-persistence.md  M4c Server、SSE 与 SQLite 设计（已实现）
+│   ├── server-and-persistence.md  M4c Server、SSE 与 SQLite 设计（已实现）
+│   └── ui-and-api.md              M5 React UI 与补充 API 设计
 └── milestones/
     ├── _MILESTONE_TEMPLATE.md     记录模板,下划线前缀排在正文之前
     ├── M1-agent-runtime.md        Agent Runtime 最小闭环（已完成）
     ├── M2-model-system.md         模型系统（M2a 已完成）
     ├── M3-local-execution.md      本地执行（已完成）
-    └── M4-context-cli-server.md   M4 一个里程碑一个文件，内部按 M4a/M4b/M4c 分节
+    ├── M4-context-cli-server.md   M4 一个里程碑一个文件，内部按 M4a/M4b/M4c 分节
+    └── M5-react-ui.md             M5 React UI，内部按 M5a/M5b/M5c 分节
 ```
 
 ## 命名与编号
@@ -61,6 +63,7 @@ docs/
 | M2 | 模型系统（配置驱动、协议适配器） | 进行中 | M2a：2026-09-17 | [M2-model-system.md](milestones/M2-model-system.md) |
 | M3 | 本地执行（系统提示、五个工具、Policy） | 已完成（M3b 可选扩展未做） | 2026-09-17 | [M3-local-execution.md](milestones/M3-local-execution.md) |
 | M4 | Context、CLI 与 Server（M4a 上下文组装 / M4b CLI 与三档审批 / M4c Server 与 SQLite / M4d 指令分层） | 已完成 | M4a：2026-09-17；M4b：2026-09-18；M4c、M4d：2026-09-21 | [M4-context-cli-server.md](milestones/M4-context-cli-server.md) |
+| M5 | React UI（M5a UI API Contract / M5b React UI / M5c Provider Settings） | 进行中（M5a、M5b 已完成） | M5a、M5b：2026-09-21 | [M5-react-ui.md](milestones/M5-react-ui.md) |
 
 状态取值：进行中 / 已完成 / 已被取代。
 
@@ -75,3 +78,4 @@ docs/
 | [context-assembly.md](design/context-assembly.md) | M4a 上下文组装：稳定前缀、项目说明快照、每轮注入 | 已实现 |
 | [cli-and-approval.md](design/cli-and-approval.md) | M4b CLI：会话模型、三档审批（`ask`/`auto`/`full`）、事件与脱敏 | 已实现 |
 | [server-and-persistence.md](design/server-and-persistence.md) | M4c 本地 Server：Session/Run API、SSE、审批回传与 SQLite | 已实现 |
+| [ui-and-api.md](design/ui-and-api.md) | M5 React UI：信息架构、补充查询 API、模型目录与 Trace | M5a、M5b 已实现 |

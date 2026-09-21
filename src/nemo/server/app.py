@@ -12,19 +12,28 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from nemo.adapters.sqlite import ActiveRunError, SQLiteRepository, TERMINAL_STATUSES
+from nemo.core.contracts.errors import ConfigError, NemoError
+from nemo.core.contracts.types import Message
 from nemo.server.errors import (
     ApprovalConflictError,
     ApprovalNotFoundError,
     RunNotFoundError,
     SessionNotFoundError,
+    ProviderNotFoundError,
 )
 from nemo.server.schemas import (
     ActionResponse,
     ApprovalAnswerRequest,
     CreateRunRequest,
     CreateSessionRequest,
+    ModelOptionResponse,
+    ProviderResponse,
+    ProviderTestRequest,
+    ProviderTestResponse,
     RunResponse,
     SessionResponse,
+    TraceResponse,
+    UpdateSessionModelRequest,
     UpdateSessionRequest,
 )
 from nemo.server.service import AgentService
@@ -63,11 +72,14 @@ def create_app(
         "/sessions", response_model=SessionResponse, status_code=status.HTTP_201_CREATED
     )
     async def create_session(body: CreateSessionRequest) -> dict:
-        return agent_service.create_session(
-            workspace=body.workspace,
-            model=body.model,
-            approval_mode=body.approval_mode,
-        )
+        try:
+            return agent_service.create_session(
+                workspace=body.workspace,
+                model=body.model,
+                approval_mode=body.approval_mode,
+            )
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
 
     @app.get("/sessions", response_model=list[SessionResponse])
     async def list_sessions() -> list[dict]:
@@ -88,6 +100,64 @@ def create_app(
             )
         except SessionNotFoundError:
             raise HTTPException(status_code=404, detail="session not found") from None
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+
+    @app.put("/sessions/{session_id}/model", response_model=SessionResponse)
+    async def set_session_model(
+        session_id: str, body: UpdateSessionModelRequest
+    ) -> dict:
+        try:
+            return agent_service.set_session_model(session_id, body.model)
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+
+    @app.get("/sessions/{session_id}/messages", response_model=list[Message])
+    async def session_messages(session_id: str) -> tuple[Message, ...]:
+        try:
+            return agent_service.session_messages(session_id)
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+
+    @app.get("/sessions/{session_id}/runs", response_model=list[RunResponse])
+    async def session_runs(session_id: str) -> list[dict]:
+        try:
+            return agent_service.session_runs(session_id)
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+
+    @app.get("/models", response_model=list[ModelOptionResponse])
+    async def models() -> list[dict]:
+        try:
+            return agent_service.models()
+        except ConfigError as exc:
+            raise HTTPException(status_code=503, detail=exc.public_message) from None
+
+    @app.get("/providers", response_model=list[ProviderResponse])
+    async def providers() -> list[dict]:
+        try:
+            return agent_service.providers()
+        except ConfigError as exc:
+            raise HTTPException(status_code=503, detail=exc.public_message) from None
+
+    @app.post(
+        "/providers/{provider_id}/test", response_model=ProviderTestResponse
+    )
+    async def test_provider(
+        provider_id: str, body: ProviderTestRequest
+    ) -> dict:
+        try:
+            return await agent_service.test_provider(provider_id, body.model)
+        except ProviderNotFoundError:
+            raise HTTPException(status_code=404, detail="provider not found") from None
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from None
+        except NemoError as exc:
+            raise HTTPException(status_code=502, detail=exc.public_message) from None
 
     @app.post(
         "/sessions/{session_id}/runs",
@@ -110,6 +180,13 @@ def create_app(
     async def get_run(run_id: str) -> dict:
         try:
             return agent_service.get_run(run_id)
+        except RunNotFoundError:
+            raise HTTPException(status_code=404, detail="run not found") from None
+
+    @app.get("/runs/{run_id}/trace", response_model=TraceResponse)
+    async def trace(run_id: str) -> dict:
+        try:
+            return agent_service.trace(run_id)
         except RunNotFoundError:
             raise HTTPException(status_code=404, detail="run not found") from None
 

@@ -1,4 +1,5 @@
 import asyncio
+import sqlite3
 import stat
 import tempfile
 import unittest
@@ -8,7 +9,11 @@ import httpx
 
 from nemo.adapters.sqlite import ActiveRunError, SQLiteRepository
 from nemo.adapters.tools.filesystem import WriteFileTool
+from nemo.config.secrets import SecretLoader
+from nemo.core.contracts.model_config import AppConfig
 from nemo.core.contracts.types import ModelResponse, ToolCall
+from nemo.core.models.registry import ModelRegistry
+from nemo.core.models.resolver import ModelResolver
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
 from nemo.server.app import create_app
 from nemo.server.service import AgentService
@@ -37,6 +42,33 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.services.append(service)
         return service, model
 
+    @staticmethod
+    def config():
+        return AppConfig.model_validate(
+            {
+                "default": "chat",
+                "providers": {
+                    "demo": {
+                        "protocol": "openai_compatible",
+                        "base_url": (
+                            "https://user:password@example.test/v1?api_key=hidden"
+                        ),
+                        "api_key_env": "DEMO_API_KEY",
+                        "headers": {"X-Private": "must-not-leak"},
+                    }
+                },
+                "models": {
+                    "demo-model": {
+                        "provider": "demo",
+                        "model_id": "model-v1",
+                        "capabilities": ["tool_calling"],
+                    }
+                },
+                "aliases": {"fast": "demo-model"},
+                "profiles": {"chat": {"model": "demo-model"}},
+            }
+        )
+
     async def wait_terminal(self, service, run_id):
         for _ in range(100):
             run = service.get_run(run_id)
@@ -51,6 +83,19 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         transport = httpx.ASGITransport(app=app)
         async with app.router.lifespan_context(app):
             async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                openapi = (await client.get("/openapi.json")).json()
+                self.assertTrue(
+                    {
+                        "/sessions/{session_id}/messages",
+                        "/sessions/{session_id}/runs",
+                        "/sessions/{session_id}/model",
+                        "/runs/{run_id}/trace",
+                        "/models",
+                        "/providers",
+                        "/providers/{provider_id}/test",
+                    }
+                    <= set(openapi["paths"])
+                )
                 created = await client.post(
                     "/sessions",
                     json={
@@ -92,6 +137,131 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
                 session = await client.get(f"/sessions/{session_id}")
                 self.assertEqual(session.json()["message_count"], 2)
+
+                messages = await client.get(f"/sessions/{session_id}/messages")
+                self.assertEqual(
+                    [item["role"] for item in messages.json()],
+                    ["user", "assistant"],
+                )
+                runs = await client.get(f"/sessions/{session_id}/runs")
+                self.assertEqual([item["run_id"] for item in runs.json()], [run_id])
+                trace = await client.get(f"/runs/{run_id}/trace")
+                self.assertEqual(trace.status_code, 200)
+                self.assertEqual(trace.json()["run"]["run_id"], run_id)
+                self.assertEqual(len(trace.json()["model_calls"]), 1)
+                self.assertGreaterEqual(trace.json()["duration_ms"], 0)
+
+    async def test_model_provider_catalog_and_connection_test(self):
+        config = self.config()
+        resolver = ModelResolver(ModelRegistry(config))
+
+        def client_factory(**kwargs):
+            model = FakeModel([ModelResponse(content="OK")])
+            model.resolved = resolver.resolve(run_override=kwargs.get("run_override"))
+            return model
+
+        service = AgentService(
+            SQLiteRepository(self.root / "catalog.sqlite"),
+            client_factory=client_factory,
+            tools_factory=lambda: (),
+            config_loader=lambda: config,
+            secret_loader_factory=lambda: SecretLoader(
+                env_file=self.root / "missing.env",
+                environ={"DEMO_API_KEY": "configured-secret"},
+            ),
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                models = (await client.get("/models")).json()
+                self.assertEqual(
+                    [item["selection"] for item in models],
+                    ["chat", "fast", "demo-model"],
+                )
+                self.assertTrue(models[0]["is_default"])
+                self.assertEqual(models[0]["provider_id"], "demo")
+
+                providers_response = await client.get("/providers")
+                self.assertEqual(providers_response.status_code, 200)
+                providers = providers_response.json()
+                self.assertTrue(providers[0]["secret_configured"])
+                self.assertEqual(providers[0]["base_url"], "https://example.test/v1")
+                self.assertNotIn("configured-secret", providers_response.text)
+                self.assertNotIn("must-not-leak", providers_response.text)
+                self.assertNotIn("password", providers_response.text)
+                self.assertNotIn("hidden", providers_response.text)
+
+                session = (
+                    await client.post(
+                        "/sessions",
+                        json={"workspace": str(self.root), "approval_mode": "full"},
+                    )
+                ).json()
+                changed = await client.put(
+                    f"/sessions/{session['session_id']}/model",
+                    json={"model": "fast"},
+                )
+                self.assertEqual(changed.status_code, 200)
+                self.assertEqual(changed.json()["model"], "fast")
+                invalid = await client.put(
+                    f"/sessions/{session['session_id']}/model",
+                    json={"model": "missing"},
+                )
+                self.assertEqual(invalid.status_code, 422)
+
+                started = await client.post(
+                    f"/sessions/{session['session_id']}/runs",
+                    json={"prompt": "hello", "max_steps": 1},
+                )
+                run_id = started.json()["run_id"]
+                finished = await self.wait_terminal(service, run_id)
+                self.assertEqual(finished["model_selection"], "fast")
+                self.assertEqual(finished["model_name"], "demo-model")
+                self.assertEqual(finished["model_id"], "model-v1")
+                self.assertEqual(finished["model_protocol"], "openai_compatible")
+                self.assertEqual(finished["model_provider"], "demo")
+
+                tested = await client.post("/providers/demo/test", json={})
+                self.assertEqual(tested.status_code, 200)
+                self.assertEqual(tested.json()["selection"], "chat")
+                self.assertGreaterEqual(tested.json()["latency_ms"], 0)
+
+    async def test_existing_database_is_migrated_with_model_identity_columns(self):
+        path = self.root / "old.sqlite"
+        connection = sqlite3.connect(path)
+        connection.execute(
+            """CREATE TABLE runs (
+                run_id TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                status TEXT NOT NULL,
+                prompt TEXT NOT NULL,
+                max_steps INTEGER NOT NULL,
+                output TEXT,
+                error TEXT,
+                created_at TEXT NOT NULL,
+                started_at TEXT,
+                finished_at TEXT
+            )"""
+        )
+        connection.commit()
+        connection.close()
+
+        repository = SQLiteRepository(path)
+        self.addCleanup(repository.close)
+        with sqlite3.connect(path) as check:
+            columns = {row[1] for row in check.execute("PRAGMA table_info(runs)")}
+        self.assertTrue(
+            {
+                "model_selection",
+                "model_name",
+                "model_id",
+                "model_protocol",
+                "model_provider",
+            }
+            <= columns
+        )
 
     async def test_one_active_run_per_session_and_cancel(self):
         entered = asyncio.Event()
@@ -149,6 +319,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.root / "answer.txt").read_text(), "approved")
         event_types = [e.type for e in service.events_after(run["run_id"], 0)]
         self.assertIn("approval.resolved", event_types)
+        trace = service.trace(run["run_id"])
+        self.assertEqual(len(trace["tool_calls"]), 1)
+        self.assertEqual(trace["tool_calls"][0]["name"], "write_file")
+        self.assertEqual(trace["tool_calls"][0]["status"], "completed")
+        self.assertGreaterEqual(trace["tool_calls"][0]["duration_ms"], 0)
 
     async def test_startup_marks_abandoned_runs_interrupted(self):
         repository = SQLiteRepository(self.root / "recovery.sqlite")

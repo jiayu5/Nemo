@@ -12,3 +12,7 @@ class ApprovalNotFoundError(LookupError):
 
 class ApprovalConflictError(RuntimeError):
     pass
+
+
+class ProviderNotFoundError(LookupError):
+    pass

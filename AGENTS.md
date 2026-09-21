@@ -6,9 +6,10 @@ Nemo 是个人 Agent OS 与 Agent 技术实验平台。基础设施使用成熟�
 
 ## 当前阶段与目录约定
 
-- M1（Agent Runtime 最小闭环）、M2a（配置驱动的真实模型接入、`openai_compatible` 协议、token 统计）、M3（本地执行）与 M4（Context、CLI、Server）已完成。M4 包含上下文组装、CLI 与三档审批、指令分层，以及 Server 的 Session/Run API、SSE 与 SQLite 持久化；子线共用 [docs/milestones/M4-context-cli-server.md](docs/milestones/M4-context-cli-server.md) 一个文件。
+- M1（Agent Runtime 最小闭环）、M2a（配置驱动的真实模型接入、`openai_compatible` 协议、token 统计）、M3（本地执行）与 M4（Context、CLI、Server）已完成；M5 进行中，其中 M5a（UI 查询 API、模型/Provider 目录、Trace）与 M5b（React UI 最小闭环）已完成，M5c（Provider Settings）未开始。M5 记录见 [docs/milestones/M5-react-ui.md](docs/milestones/M5-react-ui.md)。
 - `src/nemo/core/session.py` 只保存会话状态（会话标识、消息历史、workspace），不做文件 I/O；`src/nemo/cli/` 保存命令行客户端（参数解析、REPL、审批交互、事件渲染、JSONL transcript 与脱敏）；`src/nemo/core/tools/approval.py` 与 `command_rules.py` 保存审批策略与 shell 命令形态判定。审批只做策略，core 不做 I/O。
 - `src/nemo/server/` 保存本地 FastAPI 宿主、Session/Run 应用服务、SSE 与远程审批协议；Server 只编排 Core，不实现第二套 Agent Loop。SQLite 实现位于 `src/nemo/adapters/sqlite.py`，不进入 Core。
+- `apps/ui/` 保存 React + TypeScript + Vite 客户端；源码在 `src/`，前端测试与对应模块就近放置。开发态统一通过 Vite 的 `/api` 代理访问本地 Server，不直接读取 SQLite、配置文件或密钥。`package-lock.json` 提交，`node_modules/`、`dist/`、coverage、`*.tsbuildinfo` 与编译生成的 Vite 配置文件不提交；清理这些本地产物仍遵守删除前确认。
 - 说明文件分两层，都是 `AGENTS.md`，靠位置区分作用域：用户级 `~/.nemo/AGENTS.md`（跨项目的 Agent 行为偏好）与项目级 `<workspace>/AGENTS.md`（该项目自己的约定）。两者都只做**追加**，由 `src/nemo/prompts/instructions.py` 读取（core 之外），会话开始时各快照一次；任何说明文件都不能放宽路径检查与审批，那是代码强制的边界。
 - CLI 的三档审批：`ask`（默认，改动前确认）、`auto`（只确认识别得出的危险）、`full`（不确认）。判定规则是人工维护的表，不是沙箱；`auto` 的最坏情况等同 `full`，不得把它当安全边界。
 - `src/nemo/core/contracts/` 保存 Pydantic 数据模型与 Protocol；`runtime/` 保存 Loop；`context/` 保存基础上下文组装；`tools/` 保存注册和执行边界。
@@ -57,6 +58,7 @@ Nemo 是个人 Agent OS 与 Agent 技术实验平台。基础设施使用成熟�
 - 文档变更检查 Mermaid 代码围栏完整、图中标识符和引用一致、阶段范围与模块依赖方向一致。
 - 使用 `conda create --file environment.yml --override-channels -c conda-forge` 创建环境；`conda run -n nemo python -m unittest discover -s tests -v` 执行测试；`conda run -n nemo python examples/minimal_agent.py` 验证闭环演示。
 - `conda run -n nemo python -m nemo.cli --help`、`conda run -n nemo python -m nemo.cli --workspace <dir> --mode auto "<任务>"` 验证 CLI；交互式审批需要真实 TTY，非 TTY 环境一律按拒绝处理（脚本要放行就显式用 `--mode full`）。
+- React UI 使用 `npm --prefix apps/ui test -- --run`、`npm --prefix apps/ui run typecheck` 与 `npm --prefix apps/ui run build` 验证；开发时先启动 Nemo Server，再运行 `npm --prefix apps/ui run dev`，由 `/api` 代理保持同源。
 - 更新依赖时同步 pyproject.toml 与 requirements-lock.txt，并重新验证；requirements-lock.txt 是版本快照，不是跨平台 Conda 二进制锁文件。
 - M1 验收覆盖消息回填、未知工具、参数错误、执行失败、步数上限、取消和终态事件唯一性。
 - M2 验收覆盖配置解析与引用校验、解析优先级、能力不匹配、同协议新增 Provider 仅改配置、密钥不出现在错误与事件中、token 统计与缓存命中可观测。

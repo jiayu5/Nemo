@@ -28,13 +28,20 @@ flowchart LR
 | `GET` | `/sessions` | 无 | `200 SessionResponse[]` | 按最近更新时间列出 Session |
 | `GET` | `/sessions/{session_id}` | 无 | `200 SessionResponse` | 查询 Session 与历史消息数 |
 | `PATCH` | `/sessions/{session_id}` | 可选 `model`、`approval_mode` | `200 SessionResponse` | 修改后续 Run 使用的会话设置 |
+| `PUT` | `/sessions/{session_id}/model` | `model` | `200 SessionResponse` | 校验并切换后续 Run 的模型选择 |
+| `GET` | `/sessions/{session_id}/messages` | 无 | `200 Message[]` | 恢复脱敏后的会话历史 |
+| `GET` | `/sessions/{session_id}/runs` | 无 | `200 RunResponse[]` | 列出该会话的 Run |
 | `POST` | `/sessions/{session_id}/runs` | `prompt`、`max_steps` | `202 RunResponse` | 把一次用户输入创建为后台 Run；同一 Session 同时只能有一个活动 Run |
 | `GET` | `/runs/{run_id}` | 无 | `200 RunResponse` | 查询 Run 状态、最终输出与安全错误摘要 |
+| `GET` | `/runs/{run_id}/trace` | 无 | `200 TraceResponse` | 查询持久化事件及 Step、模型调用、工具调用耗时 |
 | `POST` | `/runs/{run_id}/cancel` | 无 | `200 ActionResponse` | 请求取消活动 Run；已终止时返回 `already_terminal` |
 | `POST` | `/runs/{run_id}/approvals/{request_id}` | `outcome` | `200 {"status":"answered"}` | 回传 `allow_once`、`allow_session` 或 `deny` |
 | `GET` | `/runs/{run_id}/events` | 查询参数 `after`，或请求头 `Last-Event-ID` | `200 text/event-stream` | 按 SQLite 事件序号发送 SSE；重连时只发游标之后的事件 |
+| `GET` | `/models` | 无 | `200 ModelOptionResponse[]` | 列出 profile、alias 与直接模型选择 |
+| `GET` | `/providers` | 无 | `200 ProviderResponse[]` | 列出不含密钥/header 的 Provider 状态 |
+| `POST` | `/providers/{provider_id}/test` | 可选 `model` | `200 ProviderTestResponse` | 显式发起最小真实模型请求并报告延迟 |
 
-`SessionResponse` 包含 `session_id`、`workspace`、`model`、`approval_mode`、创建/更新时间与 `message_count`。`RunResponse` 包含 `run_id`、`session_id`、`status`、`max_steps`、`output`、`error` 与三个时间字段。请求模型均拒绝未知字段，路径不存在返回 `404`，会话已有活动 Run 或审批已失效返回 `409`，请求体不合法返回 `422`。
+`SessionResponse` 包含 `session_id`、`workspace`、`model`、`approval_mode`、创建/更新时间与 `message_count`。`RunResponse` 还包含实际解析出的 `model_selection`、`model_name`、`model_id`、`model_protocol` 与 `model_provider`；旧 Run 的这些字段可以为空。请求模型均拒绝未知字段，路径不存在返回 `404`，会话已有活动 Run 或审批已失效返回 `409`，请求体不合法返回 `422`。
 
 FastAPI 同时提供 `/docs`、`/redoc` 与 `/openapi.json`，它们从实际请求/响应模型自动生成，作为实现契约的可执行视图。
 

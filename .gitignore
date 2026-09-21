@@ -5,3 +5,9 @@ __pycache__/
 dist/
 *.egg-info/
 .env
+apps/ui/node_modules/
+apps/ui/dist/
+apps/ui/coverage/
+apps/ui/*.tsbuildinfo
+apps/ui/vite.config.js
+apps/ui/vite.config.d.ts

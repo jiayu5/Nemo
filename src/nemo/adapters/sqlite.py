@@ -149,6 +149,21 @@ class SQLiteRepository:
                 );
                 """
             )
+            self._ensure_column("runs", "model_selection", "TEXT")
+            self._ensure_column("runs", "model_name", "TEXT")
+            self._ensure_column("runs", "model_id", "TEXT")
+            self._ensure_column("runs", "model_protocol", "TEXT")
+            self._ensure_column("runs", "model_provider", "TEXT")
+
+    def _ensure_column(self, table: str, column: str, declaration: str) -> None:
+        columns = {
+            row["name"]
+            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        if column not in columns:
+            self._connection.execute(
+                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
+            )
 
     def create_session(
         self,
@@ -248,6 +263,34 @@ class SQLiteRepository:
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         return dict(row) if row is not None else None
+
+    def list_runs(self, session_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM runs WHERE session_id = ?
+                   ORDER BY created_at DESC""",
+                (session_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def set_run_model(
+        self,
+        run_id: str,
+        *,
+        selection: str,
+        model_name: str,
+        model_id: str,
+        protocol: str,
+        provider: str,
+    ) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                """UPDATE runs
+                   SET model_selection = ?, model_name = ?, model_id = ?,
+                       model_protocol = ?, model_provider = ?
+                   WHERE run_id = ?""",
+                (selection, model_name, model_id, protocol, provider, run_id),
+            )
 
     def set_run_running(self, run_id: str) -> None:
         with self._lock, self._connection:
@@ -368,6 +411,22 @@ class SQLiteRepository:
             )
             for row in rows
         ]
+
+    def steps(self, run_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                "SELECT * FROM steps WHERE run_id = ? ORDER BY step", (run_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def tool_calls(self, run_id: str) -> list[dict[str, Any]]:
+        with self._lock:
+            rows = self._connection.execute(
+                """SELECT * FROM tool_calls WHERE run_id = ?
+                   ORDER BY started_at, tool_call_id""",
+                (run_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def create_approval(
         self,

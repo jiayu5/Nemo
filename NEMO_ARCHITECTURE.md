@@ -426,6 +426,10 @@ Phase 1 推荐分解为以下里程碑：
 
 **M4c · Server 与 SQLite（2026-09-21 实现）**：本地 FastAPI Server 成为 Session、Run、事件与审批的唯一生命周期所有者，CLI 默认通过 HTTP + SSE 使用它；Core Runtime 仍保持框架无关。SQLite 保存历史、事件与物化的步骤/工具调用，数据库事件序号承担 SSE 重连游标；同一 Session 只允许一个活动 Run，重启后遗留 Run 标记为 `interrupted` 而不自动重放。`--direct` 仅保留作故障恢复与嵌入式调试入口。设计见 [docs/design/server-and-persistence.md](docs/design/server-and-persistence.md)。
 
+**M5a · UI API Contract（2026-09-21 实现）**：在 M4c 执行 API 之上补齐消息与 Run 历史、Trace、模型目录、Provider 安全元数据、会话模型切换和显式连接测试。Run 持久化实际解析出的模型身份，Trace 从已有事件与物化表计算耗时；Provider 响应不返回密钥、header、URL userinfo 或 query。设计见 [docs/design/ui-and-api.md](docs/design/ui-and-api.md)，实施证据见 [M5](docs/milestones/M5-react-ui.md)。
+
+**M5b · React UI 最小闭环（2026-09-21 实现）**：`apps/ui/` 使用 React、TypeScript 与 Vite，提供 Session 列表、对话、Run/Trace、审批卡片、停止按钮、模型/审批模式切换和 Provider 状态。开发态通过 Vite `/api` 代理保持同源，不放宽 Server CORS；组件测试、类型检查、生产构建、依赖审计和真实浏览器只读联调均通过。
+
 **M3 工具集与执行模型（2026-09-17 确定）**：工具采用细粒度拆分而不是「一个文件系统工具带操作参数」，与 Claude Code（`Read`/`Write`/`Edit`/`Bash` 各自独立）一致；Codex 采用「Shell + apply_patch」的粗粒度路线，但依赖沙箱与审批系统补足权限粒度，而 Nemo 的沙箱排在 Phase 3。在没有沙箱的前提下，工具粒度本身就是唯一可用的权限阀，因此拆分是必然选择。Phase 1 工具集固定为 `read_file`、`write_file`、`edit_file`、`list_dir`、`run_shell` 五个，不含独立的 Python 工具（可用 `run_shell` 执行）。Shell 采用「每次调用独立进程 + 显式 `workdir`」，不使用常驻会话：常驻会话会让 `cd`、环境变量、后台任务等状态跨越调用，破坏「每个 Run 独立、结果可复现」的前提；超时与取消必须终止整个进程组，而不只是父进程。常驻会话的接口位置保留，等 M4/M5 出现真实交互需求时再按需加入。
 
 **M3b 工具集扩展（2026-09-21 追加）**：在五个本地工具之外增加 `web_search` 与 `fetch_url`，工具集变为七个。动机是模型此前会回答「我没有联网能力」——工具清单里确实没有联网工具，而系统提示对环境只字未提，模型只能猜。两个工具都标为 `read_only`：审批确认的是**改动**，HTTP GET 不改动本机，可见性由事件里的查询词与 URL 承担。搜索后端当前用 Bing HTML 抓取（无密钥、当前网络下唯一可达且可解析的选项），但实测对 Python 客户端返回降级结果集、技术细节查询相关性不可靠；换成带密钥的搜索 API 已记入 [TODO.md](docs/TODO.md) T2。设计见 [docs/design/web-tools.md](docs/design/web-tools.md)，实施与验证见 [M3-local-execution.md](docs/milestones/M3-local-execution.md) 的 M3b 小节。
