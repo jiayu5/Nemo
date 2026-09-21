@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, KeyboardEvent } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, formatDuration, subscribeToRun } from "./api";
@@ -156,6 +156,17 @@ export default function App() {
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Could not start run");
       setActiveRun(null);
+    }
+  }
+
+  function handlePromptKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      event.currentTarget.form?.requestSubmit();
     }
   }
 
@@ -331,18 +342,24 @@ export default function App() {
               <textarea
                 value={prompt}
                 onChange={(event) => setPrompt(event.target.value)}
-                placeholder={selected ? "Describe a task for Nemo…" : "Create a session first"}
+                onKeyDown={handlePromptKeyDown}
+                placeholder={selected ? "Ask anything" : "Create a session first"}
                 disabled={!selected || Boolean(activeRun)}
                 rows={3}
               />
-              <div className="composer-meta">
-                <span>↵ Run task</span>
-                <span>Local workspace</span>
+              <div className="composer-toolbar">
+                <button className="composer-add" type="button" aria-label="Add context">＋</button>
+                <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
+                <button
+                  className="composer-send"
+                  type="submit"
+                  aria-label="Run task"
+                  disabled={!selected || !prompt.trim() || Boolean(activeRun)}
+                >
+                  {activeRun ? <span className="running-spinner" /> : "↑"}
+                </button>
               </div>
             </div>
-            <button type="submit" aria-label="Run task" disabled={!selected || !prompt.trim() || Boolean(activeRun)}>
-              {activeRun ? <span className="running-spinner" /> : "↑"}
-            </button>
           </form>
         </section>
 
