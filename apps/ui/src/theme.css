@@ -340,7 +340,34 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   line-height: 1;
 }
 .composer-add:hover { background: rgba(66,190,178,.12); }
-.composer-hint { color: #789096; font-size: 10px; }
+.composer-control { min-width: 0; display: flex; align-items: center; gap: 4px; }
+.composer-control select {
+  min-width: 0;
+  max-width: 145px;
+  padding: 5px 20px 5px 6px;
+  color: #d8e9e6;
+  background-color: transparent;
+  border: 0;
+  border-radius: 5px;
+  outline: none;
+  font-size: 11px;
+  font-weight: 550;
+}
+.composer-control select:hover:not(:disabled) { background-color: rgba(66,190,178,.1); }
+.composer-control select:disabled { cursor: default; opacity: .5; }
+.approval-control select { max-width: 76px; padding-left: 2px; }
+.approval-icon {
+  width: 17px;
+  height: 19px;
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  color: #fff4ef;
+  background: var(--signal);
+  clip-path: polygon(50% 0, 92% 17%, 84% 72%, 50% 100%, 16% 72%, 8% 17%);
+  font-size: 10px;
+  font-weight: 800;
+}
 .composer-send {
   width: 36px;
   height: 36px;
@@ -418,7 +445,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .messages { padding: 24px 16px; }
   .composer { padding-left: 14px; padding-right: 14px; }
   .composer-surface { border-radius: 24px; }
-  .composer-hint { display: none; }
+  .composer-toolbar { gap: 5px; }
+  .composer-control select { max-width: 120px; }
   .approval-card { margin-left: 14px; margin-right: 14px; }
   .statusbar { gap: 10px; overflow-x: auto; }
   .statusbar > span { display: none; }

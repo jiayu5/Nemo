@@ -349,7 +349,33 @@ export default function App() {
               />
               <div className="composer-toolbar">
                 <button className="composer-add" type="button" aria-label="Add context">＋</button>
-                <span className="composer-hint">Enter to send · Shift+Enter for a new line</span>
+                <label className="composer-control approval-control">
+                  <span className="approval-icon" aria-hidden="true">!</span>
+                  <select
+                    aria-label="Approval"
+                    value={selected?.approval_mode ?? "ask"}
+                    disabled={!selected || Boolean(activeRun)}
+                    onChange={(event) => void updateMode(event.target.value as ApprovalMode)}
+                  >
+                    <option value="ask">Ask</option>
+                    <option value="auto">Auto</option>
+                    <option value="full">Full</option>
+                  </select>
+                </label>
+                <label className="composer-control model-control">
+                  <select
+                    aria-label="Model"
+                    value={selected?.model ?? models.find((item) => item.is_default)?.selection ?? ""}
+                    disabled={!selected || Boolean(activeRun)}
+                    onChange={(event) => void updateModel(event.target.value)}
+                  >
+                    {models.map((model) => (
+                      <option key={model.selection} value={model.selection}>
+                        {model.selection} · {model.provider_id}
+                      </option>
+                    ))}
+                  </select>
+                </label>
                 <button
                   className="composer-send"
                   type="submit"
@@ -419,32 +445,6 @@ export default function App() {
 
       <footer className="statusbar">
         <span className="workspace-status"><i /><b>Workspace</b> {selected?.workspace ?? "—"}</span>
-        <label>
-          <b>Model</b>
-          <select
-            value={selected?.model ?? models.find((item) => item.is_default)?.selection ?? ""}
-            disabled={!selected}
-            onChange={(event) => void updateModel(event.target.value)}
-          >
-            {models.map((model) => (
-              <option key={model.selection} value={model.selection}>
-                {model.selection} · {model.provider_id}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label>
-          <b>Approval</b>
-          <select
-            value={selected?.approval_mode ?? "ask"}
-            disabled={!selected}
-            onChange={(event) => void updateMode(event.target.value as ApprovalMode)}
-          >
-            <option value="ask">Ask</option>
-            <option value="auto">Auto</option>
-            <option value="full">Full</option>
-          </select>
-        </label>
       </footer>
     </div>
   );

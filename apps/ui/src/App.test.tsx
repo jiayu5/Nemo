@@ -71,6 +71,10 @@ describe("App", () => {
     expect(screen.getByText("Create a session to begin.")).toBeInTheDocument();
     expect(screen.getByText("demo")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "New session" })).toBeInTheDocument();
+    expect(screen.getByRole("combobox", { name: "Model" }).closest(".composer-toolbar"))
+      .not.toBeNull();
+    expect(screen.getByRole("combobox", { name: "Approval" }).closest(".composer-toolbar"))
+      .not.toBeNull();
   });
 
   it("sends with Enter and preserves Shift+Enter for a new line", async () => {
