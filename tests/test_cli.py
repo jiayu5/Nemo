@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from nemo.cli.approver import parse_answer
 from nemo.cli.main import main
-from nemo.cli.render import redact
+from nemo.redaction import redact
 from nemo.cli.streams import Streams
 from nemo.cli.transcript import SessionHeader, append_messages, load_transcript, write_header
 from nemo.core.contracts.model_config import ResolvedModel
@@ -238,7 +238,7 @@ class CliTests(unittest.TestCase):
     def test_default_cli_uses_the_server_contract(self):
         written = []
         streams = Streams.scripted([], written=written, is_tty=False)
-        with patch("nemo.cli.main.ServerClient", FakeServerClient):
+        with patch("nemo.cli.remote.ServerClient", FakeServerClient):
             code = main(self.base_args("hello"), streams=streams)
 
         output = "\n".join(written)
@@ -397,7 +397,7 @@ class CliTests(unittest.TestCase):
 
     def test_instructions_line_reports_the_project_file(self):
         (self.workspace / "AGENTS.md").write_text("Use tabs.", encoding="utf-8")
-        with patch("nemo.cli.main.load_user_instructions", return_value=None):
+        with patch("nemo.cli.direct.load_user_instructions", return_value=None):
             code, output, _ = self.run_cli(
                 self.base_args("hi"), [ModelResponse(content="ok")], ["hi"]
             )
@@ -406,7 +406,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("instructions: project AGENTS.md (9 chars)", output)
 
     def test_instructions_line_says_none_when_nothing_is_loaded(self):
-        with patch("nemo.cli.main.load_user_instructions", return_value=None):
+        with patch("nemo.cli.direct.load_user_instructions", return_value=None):
             _, output, _ = self.run_cli(
                 self.base_args("hi"), [ModelResponse(content="ok")], ["hi"]
             )
@@ -414,7 +414,7 @@ class CliTests(unittest.TestCase):
         self.assertIn("instructions: none", output)
 
     def test_user_instructions_reach_the_prompt_and_the_startup_line(self):
-        with patch("nemo.cli.main.load_user_instructions", return_value="Be terse."):
+        with patch("nemo.cli.direct.load_user_instructions", return_value="Be terse."):
             _, output, client = self.run_cli(
                 self.base_args("hi"), [ModelResponse(content="ok")], ["hi"]
             )

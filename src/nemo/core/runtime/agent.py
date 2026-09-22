@@ -5,6 +5,7 @@ from collections.abc import Callable
 
 from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.reminder import describe, fit_reminders, slot_open, step_budget
+from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import (
     AgentState, Event, Message, Model, ModelUsage, RunResult, RunStatus,
 )
@@ -47,46 +48,46 @@ class AgentRuntime:
                     # Observers cannot change execution or replay side effects.
                     # Failure is visible in the returned trace, without exception text.
                     events.append(Event(run_id=state.run_id, seq=len(events) + 1,
-                                        step=state.step_count, type="observer.failed"))
+                                        step=state.step_count, type=EventType.OBSERVER_FAILED))
 
         async def execute_loop():
             state.status = RunStatus.RUNNING
-            emit("run.started")
+            emit(EventType.RUN_STARTED)
             for step in range(1, max_steps + 1):
                 # Also yield when fake implementations return without awaiting.
                 await asyncio.sleep(0)
                 if cancel is not None and cancel.is_set():
                     raise asyncio.CancelledError
                 state.step_count = step
-                emit("step.started")
+                emit(EventType.STEP_STARTED)
                 # Reminders only exist while the model keeps acting. The user's
                 # own turn has the full step budget, so nothing is injected there.
                 reminders = fit_reminders((step_budget(step, max_steps),)) if slot_open(state) else ()
                 request = self.context.build(state, self.tools, reminders)
-                emit("model.started", reminders=describe(reminders))
+                emit(EventType.MODEL_STARTED, reminders=describe(reminders))
                 response = await self.model.generate(request)
-                emit("model.completed", tool_call_count=len(response.tool_calls),
+                emit(EventType.MODEL_COMPLETED, tool_call_count=len(response.tool_calls),
                      **_usage_payload(response.usage))
                 state.messages.append(Message(role="assistant", content=response.content,
                                               tool_calls=response.tool_calls))
                 if not response.tool_calls:
                     state.output = response.content
                     state.status = RunStatus.COMPLETED
-                    emit("step.completed")
+                    emit(EventType.STEP_COMPLETED)
                     return
                 for call in response.tool_calls:
                     await asyncio.sleep(0)
                     if cancel is not None and cancel.is_set():
                         raise asyncio.CancelledError
                     summary = self.tools.summary_for(call)
-                    emit("tool.started", tool_call_id=call.id, name=call.name, summary=summary)
+                    emit(EventType.TOOL_STARTED, tool_call_id=call.id, name=call.name, summary=summary)
                     result = await self.tools.execute(call)
                     state.messages.append(Message(role="tool", tool_result=result))
-                    emit("tool.failed" if result.error else "tool.completed",
+                    emit(EventType.TOOL_FAILED if result.error else EventType.TOOL_COMPLETED,
                          tool_call_id=call.id, name=call.name,
                          summary=summary,
                          error_code=result.error.code if result.error else None)
-                emit("step.completed")
+                emit(EventType.STEP_COMPLETED)
             state.status = RunStatus.LIMIT_REACHED
 
         worker = None
@@ -120,7 +121,7 @@ class AgentRuntime:
                     task.cancel()
             await asyncio.gather(*(t for t in (worker, watcher) if t is not None),
                                  return_exceptions=True)
-            emit(f"run.{state.status.value}", **({"error": state.error} if state.error else {}))
+            emit(EventType(f"run.{state.status.value}"), **({"error": state.error} if state.error else {}))
         return RunResult(state=state, events=tuple(events))
 
 

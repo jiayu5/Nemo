@@ -6,6 +6,10 @@ class RunNotFoundError(LookupError):
     pass
 
 
+class ActiveRunError(RuntimeError):
+    pass
+
+
 class ApprovalNotFoundError(LookupError):
     pass
 

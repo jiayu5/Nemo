@@ -3,6 +3,7 @@ from typing import Any, Mapping
 from pydantic import BaseModel, ConfigDict
 
 from nemo.core.contracts.tools import ExecutionContext
+from nemo.core.contracts.events import EventType
 from nemo.core.contracts.model_transport import HttpResponse
 from nemo.core.contracts.types import Event, ModelRequest, ModelResponse, ToolCall
 
@@ -139,4 +140,4 @@ class FakeServerClient:
         return {"status": "answered"}
 
     async def events(self, run_id, *, after=0):
-        yield Event(run_id=run_id, seq=1, step=1, type="run.completed")
+        yield Event(run_id=run_id, seq=1, step=1, type=EventType.RUN_COMPLETED)

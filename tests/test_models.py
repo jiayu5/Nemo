@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx
 
-from nemo.adapters.transport import HttpxTransport
+from nemo.adapters.httpx_transport import HttpxTransport
 from nemo.adapters.protocols.openai_compatible import OpenAICompatibleAdapter
 from nemo.bootstrap import build_adapter, build_model_client, resolve_model
 from nemo.config.loader import load_config

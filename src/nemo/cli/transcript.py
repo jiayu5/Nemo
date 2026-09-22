@@ -22,8 +22,8 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from nemo.cli.render import redact
 from nemo.core.contracts.types import Message
+from nemo.redaction import redact
 
 HEADER_TYPE = "session"
 MESSAGE_TYPE = "message"

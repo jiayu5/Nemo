@@ -5,7 +5,7 @@ Design rules behind the shape of this file:
 - Every clause handles exactly one failure mode, is two to four sentences long,
   and has a stable name so it can be revised or dropped on its own.
 - The environment block is assembled at runtime; the behavioural clauses are not.
-- Nothing volatile beyond the date goes into the stable prefix: a single changed
+- Nothing volatile goes into the stable prefix: a single changed
   character invalidates the provider-side prompt cache from that point on.
 - Anything the code already guarantees (workspace confinement, refusing to
   overwrite silently) is *not* restated here as a request.
@@ -18,7 +18,6 @@ document, and Codex keeps environment facts in a separate, machine-generated blo
 import platform as os_module
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date
 from pathlib import Path
 
 IDENTITY = "You are Nemo, a local coding agent running on the user's Mac."
@@ -26,7 +25,6 @@ IDENTITY = "You are Nemo, a local coding agent running on the user's Mac."
 ENVIRONMENT_TEMPLATE = """# Environment
 - Workspace root: {workspace}
 - Platform: {platform}
-- Today: {today}
 - Tools: {tools}
 - Paths resolve against the workspace root. Anything outside it is rejected: that is a
   boundary, not a bug.
@@ -128,7 +126,6 @@ def build_system_prompt(
     tools: Iterable[str] = (),
     reply_language: str = "Chinese",
     os_name: str | None = None,
-    today: date | None = None,
 ) -> str:
     """Assemble the stable prefix for one agent session.
 
@@ -139,7 +136,6 @@ def build_system_prompt(
     environment = ENVIRONMENT_TEMPLATE.format(
         workspace=Path(workspace).resolve(),
         platform=os_name or os_module.system(),
-        today=(today or date.today()).isoformat(),
         tools=", ".join(tools) if tools else "(none)",
     )
     language_clause = PromptClause(

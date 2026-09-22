@@ -8,6 +8,7 @@ import type {
   Session,
   Trace,
 } from "./types";
+import { RUN_EVENT_TYPES } from "./events";
 
 const API = "/api";
 
@@ -69,32 +70,13 @@ export const api = {
   trace: (runId: string) => request<Trace>(`/runs/${runId}/trace`),
 };
 
-const EVENT_TYPES = [
-  "run.started",
-  "run.completed",
-  "run.failed",
-  "run.cancelled",
-  "run.interrupted",
-  "run.limit_reached",
-  "step.started",
-  "step.completed",
-  "model.started",
-  "model.completed",
-  "tool.started",
-  "tool.completed",
-  "tool.failed",
-  "approval.requested",
-  "approval.resolved",
-  "observer.failed",
-];
-
 export function subscribeToRun(
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError: () => void,
 ): EventSource {
   const source = new EventSource(`${API}/runs/${runId}/events`);
-  for (const type of EVENT_TYPES) {
+  for (const type of RUN_EVENT_TYPES) {
     source.addEventListener(type, (message) => {
       onEvent(JSON.parse((message as MessageEvent<string>).data) as RunEvent);
     });

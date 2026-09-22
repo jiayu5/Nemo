@@ -1,4 +1,4 @@
-"""SQLite persistence adapter for local Server sessions and runs."""
+"""SQLite repository for local Server sessions and runs."""
 
 from __future__ import annotations
 
@@ -10,23 +10,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from nemo.core.contracts.types import Event, Message, RunResult, RunStatus
+from nemo.core.contracts.types import Event, Message, RunResult
+from nemo.core.contracts.events import EventType
 from nemo.redaction import redact
-
-
-TERMINAL_STATUSES = frozenset(
-    {
-        RunStatus.COMPLETED.value,
-        RunStatus.FAILED.value,
-        RunStatus.CANCELLED.value,
-        RunStatus.INTERRUPTED.value,
-        RunStatus.LIMIT_REACHED.value,
-    }
-)
-
-
-class ActiveRunError(RuntimeError):
-    pass
+from nemo.adapters.persistence.event_projection import materialize_event
+from nemo.adapters.persistence.sqlite_schema import initialize_schema
+from nemo.server.errors import ActiveRunError
 
 
 def _now() -> str:
@@ -67,103 +56,12 @@ class SQLiteRepository:
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.execute("PRAGMA journal_mode = WAL")
-        self._create_schema()
+        with self._connection:
+            initialize_schema(self._connection)
 
     def close(self) -> None:
         with self._lock:
             self._connection.close()
-
-    def _create_schema(self) -> None:
-        with self._lock, self._connection:
-            self._connection.executescript(
-                """
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    workspace TEXT NOT NULL,
-                    model TEXT,
-                    approval_mode TEXT NOT NULL,
-                    user_instructions TEXT,
-                    project_instructions TEXT,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                );
-                CREATE TABLE IF NOT EXISTS messages (
-                    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-                    position INTEGER NOT NULL,
-                    message_json TEXT NOT NULL,
-                    created_at TEXT NOT NULL,
-                    PRIMARY KEY (session_id, position)
-                );
-                CREATE TABLE IF NOT EXISTS runs (
-                    run_id TEXT PRIMARY KEY,
-                    session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE,
-                    status TEXT NOT NULL,
-                    prompt TEXT NOT NULL,
-                    max_steps INTEGER NOT NULL,
-                    output TEXT,
-                    error TEXT,
-                    created_at TEXT NOT NULL,
-                    started_at TEXT,
-                    finished_at TEXT
-                );
-                CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_session
-                    ON runs(session_id) WHERE status IN ('queued', 'running');
-                CREATE TABLE IF NOT EXISTS events (
-                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-                    seq INTEGER NOT NULL,
-                    step INTEGER NOT NULL,
-                    type TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    payload_json TEXT NOT NULL,
-                    PRIMARY KEY (run_id, seq)
-                );
-                CREATE TABLE IF NOT EXISTS steps (
-                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-                    step INTEGER NOT NULL,
-                    started_at TEXT,
-                    finished_at TEXT,
-                    PRIMARY KEY (run_id, step)
-                );
-                CREATE TABLE IF NOT EXISTS tool_calls (
-                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-                    tool_call_id TEXT NOT NULL,
-                    step INTEGER NOT NULL,
-                    name TEXT NOT NULL,
-                    summary TEXT,
-                    status TEXT NOT NULL,
-                    error_code TEXT,
-                    started_at TEXT NOT NULL,
-                    finished_at TEXT,
-                    PRIMARY KEY (run_id, tool_call_id)
-                );
-                CREATE TABLE IF NOT EXISTS approval_requests (
-                    request_id TEXT PRIMARY KEY,
-                    run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
-                    tool_name TEXT NOT NULL,
-                    summary TEXT NOT NULL,
-                    reason TEXT NOT NULL,
-                    status TEXT NOT NULL,
-                    outcome TEXT,
-                    created_at TEXT NOT NULL,
-                    answered_at TEXT
-                );
-                """
-            )
-            self._ensure_column("runs", "model_selection", "TEXT")
-            self._ensure_column("runs", "model_name", "TEXT")
-            self._ensure_column("runs", "model_id", "TEXT")
-            self._ensure_column("runs", "model_protocol", "TEXT")
-            self._ensure_column("runs", "model_provider", "TEXT")
-
-    def _ensure_column(self, table: str, column: str, declaration: str) -> None:
-        columns = {
-            row["name"]
-            for row in self._connection.execute(f"PRAGMA table_info({table})").fetchall()
-        }
-        if column not in columns:
-            self._connection.execute(
-                f"ALTER TABLE {table} ADD COLUMN {column} {declaration}"
-            )
 
     def create_session(
         self,
@@ -344,7 +242,10 @@ class SQLiteRepository:
             # Keep the repository lock until the terminal event is visible so
             # an SSE reader cannot observe a terminal status without its event.
             self.append_event(
-                run_id=run_id, step=0, kind="run.failed", payload={"error": message}
+                run_id=run_id,
+                step=0,
+                kind=EventType.RUN_FAILED,
+                payload={"error": message},
             )
 
     def interrupt_run(self, run_id: str) -> None:
@@ -357,7 +258,10 @@ class SQLiteRepository:
                 ).rowcount
             if changed:
                 self.append_event(
-                    run_id=run_id, step=0, kind="run.interrupted", payload={}
+                    run_id=run_id,
+                    step=0,
+                    kind=EventType.RUN_INTERRUPTED,
+                    payload={},
                 )
 
     def append_event(
@@ -375,7 +279,15 @@ class SQLiteRepository:
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (run_id, seq, step, kind, when, _json(safe_payload)),
             )
-            self._materialize_event(run_id, seq, step, kind, safe_payload, when)
+            materialize_event(
+                self._connection,
+                run_id=run_id,
+                seq=seq,
+                step=step,
+                kind=kind,
+                payload=safe_payload,
+                when=when,
+            )
         return Event(
             run_id=run_id,
             seq=seq,
@@ -448,7 +360,7 @@ class SQLiteRepository:
         self.append_event(
             run_id=run_id,
             step=step,
-            kind="approval.requested",
+            kind=EventType.APPROVAL_REQUESTED,
             payload={
                 "request_id": request_id,
                 "tool_name": tool_name,
@@ -487,46 +399,10 @@ class SQLiteRepository:
                     (_now(), run_id),
                 )
         for run_id in ids:
-            self.append_event(run_id=run_id, step=0, kind="run.interrupted", payload={})
+            self.append_event(
+                run_id=run_id,
+                step=0,
+                kind=EventType.RUN_INTERRUPTED,
+                payload={},
+            )
         return ids
-
-    def _materialize_event(
-        self, run_id: str, seq: int, step: int, kind: str, payload: dict[str, Any], when: str
-    ) -> None:
-        if kind == "step.started":
-            self._connection.execute(
-                """INSERT OR IGNORE INTO steps(run_id, step, started_at)
-                   VALUES (?, ?, ?)""",
-                (run_id, step, when),
-            )
-        elif kind == "step.completed":
-            self._connection.execute(
-                "UPDATE steps SET finished_at = ? WHERE run_id = ? AND step = ?",
-                (when, run_id, step),
-            )
-        elif kind == "tool.started":
-            self._connection.execute(
-                """INSERT OR REPLACE INTO tool_calls
-                   (run_id, tool_call_id, step, name, summary, status, started_at)
-                   VALUES (?, ?, ?, ?, ?, 'running', ?)""",
-                (
-                    run_id,
-                    payload.get("tool_call_id", f"event-{seq}"),
-                    step,
-                    payload.get("name", "unknown"),
-                    payload.get("summary"),
-                    when,
-                ),
-            )
-        elif kind in {"tool.completed", "tool.failed"}:
-            self._connection.execute(
-                """UPDATE tool_calls SET status = ?, error_code = ?, finished_at = ?
-                   WHERE run_id = ? AND tool_call_id = ?""",
-                (
-                    "failed" if kind == "tool.failed" else "completed",
-                    payload.get("error_code"),
-                    when,
-                    run_id,
-                    payload.get("tool_call_id"),
-                ),
-            )

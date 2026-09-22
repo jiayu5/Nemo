@@ -18,7 +18,7 @@ from nemo.core.context.reminder import (
 from nemo.core.contracts.types import AgentState, Message, ModelResponse, RunStatus, ToolCall
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.tools.registry import ToolRegistry
-from nemo.prompts.local_agent import build_system_prompt
+from nemo.prompts.system_prompt import build_system_prompt
 from nemo.prompts.instructions import load_project_instructions, load_user_instructions
 from nemo.testing.fakes import AddTool, FakeModel
 

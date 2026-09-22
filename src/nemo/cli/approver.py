@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from nemo.cli.render import redact
 from nemo.cli.streams import Streams
 from nemo.core.tools.approval import ApprovalOutcome, ApprovalRequest
+from nemo.redaction import redact
 
 PROMPT = "  allow? [y] once / [a] this session / [n] deny > "
 

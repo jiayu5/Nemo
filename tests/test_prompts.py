@@ -1,8 +1,7 @@
 import unittest
-from datetime import date
 from pathlib import Path
 
-from nemo.prompts.local_agent import (
+from nemo.prompts.system_prompt import (
     CLAUSES,
     IDENTITY,
     build_system_prompt,
@@ -52,7 +51,6 @@ class PromptRenderingTests(unittest.TestCase):
             "workspace": self.workspace,
             "tools": ("read_file", "run_shell"),
             "os_name": "Darwin",
-            "today": date(2026, 9, 17),
         }
         arguments.update(overrides)
         return build_system_prompt(**arguments)
@@ -73,7 +71,6 @@ class PromptRenderingTests(unittest.TestCase):
         # (on macOS /tmp resolves to /private/tmp).
         self.assertIn(f"- Workspace root: {self.workspace.resolve()}", prompt)
         self.assertIn("- Platform: Darwin", prompt)
-        self.assertIn("- Today: 2026-09-17", prompt)
         self.assertIn("- Tools: read_file, run_shell", prompt)
 
     def test_tools_list_handles_an_empty_registry(self):
@@ -88,8 +85,7 @@ class PromptRenderingTests(unittest.TestCase):
         for forbidden in ("deepseek", "openai", "anthropic", "api key", "httpx"):
             with self.subTest(token=forbidden):
                 self.assertNotIn(forbidden, prompt.lower())
-        # A time of day would invalidate the cache every single turn.
-        self.assertNotRegex(prompt, r"\d{2}:\d{2}")
+        self.assertNotRegex(prompt, r"\d{4}-\d{2}-\d{2}|\d{2}:\d{2}")
 
     def test_environment_rules_stay_out_of_the_behavioural_clauses(self):
         prompt = self.build()

@@ -11,16 +11,17 @@ from pathlib import Path
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 
-from nemo.adapters.sqlite import ActiveRunError, SQLiteRepository, TERMINAL_STATUSES
 from nemo.core.contracts.errors import ConfigError, NemoError
 from nemo.core.contracts.types import Message
 from nemo.server.errors import (
     ApprovalConflictError,
     ApprovalNotFoundError,
+    ActiveRunError,
     RunNotFoundError,
     SessionNotFoundError,
     ProviderNotFoundError,
 )
+from nemo.server.repository import TERMINAL_STATUSES
 from nemo.server.schemas import (
     ActionResponse,
     ApprovalAnswerRequest,
@@ -36,7 +37,7 @@ from nemo.server.schemas import (
     UpdateSessionModelRequest,
     UpdateSessionRequest,
 )
-from nemo.server.service import AgentService
+from nemo.server.application import NemoApplication
 
 
 DEFAULT_DATABASE_PATH = Path.home() / ".nemo" / "nemo.db"
@@ -45,12 +46,15 @@ DEFAULT_DATABASE_PATH = Path.home() / ".nemo" / "nemo.db"
 def create_app(
     *,
     database_path: Path | str | None = None,
-    service: AgentService | None = None,
+    service: NemoApplication | None = None,
 ) -> FastAPI:
     owned_service = service is None
-    agent_service = service or AgentService(
-        SQLiteRepository(database_path or DEFAULT_DATABASE_PATH)
-    )
+    if service is None:
+        from nemo.bootstrap import build_server_application
+
+        agent_service = build_server_application(database_path or DEFAULT_DATABASE_PATH)
+    else:
+        agent_service = service
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -236,7 +240,7 @@ def create_app(
 
 
 async def _sse(
-    service: AgentService, run_id: str, cursor: int, request: Request
+    service: NemoApplication, run_id: str, cursor: int, request: Request
 ) -> AsyncIterator[str]:
     idle_ticks = 0
     while True:

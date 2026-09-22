@@ -21,7 +21,7 @@ from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.tools.policy import AllowAllPolicy, ReadOnlyPolicy
 from nemo.core.tools.registry import ToolRegistry
-from nemo.prompts.local_agent import build_system_prompt
+from nemo.prompts.system_prompt import build_system_prompt
 from nemo.prompts.instructions import load_project_instructions, load_user_instructions
 
 def show(event) -> None:

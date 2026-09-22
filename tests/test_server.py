@@ -7,7 +7,8 @@ from pathlib import Path
 
 import httpx
 
-from nemo.adapters.sqlite import ActiveRunError, SQLiteRepository
+from nemo.adapters.persistence import SQLiteRepository
+from nemo.server.errors import ActiveRunError
 from nemo.adapters.tools.filesystem import WriteFileTool
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.model_config import AppConfig
@@ -16,7 +17,7 @@ from nemo.core.models.registry import ModelRegistry
 from nemo.core.models.resolver import ModelResolver
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
 from nemo.server.app import create_app
-from nemo.server.service import AgentService
+from nemo.server.application import NemoApplication
 from nemo.testing.fakes import FakeModel
 
 
@@ -33,7 +34,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
 
     def service(self, responses, *, tools=(), approval_timeout=1.0):
         model = FakeModel(list(responses))
-        service = AgentService(
+        service = NemoApplication(
             SQLiteRepository(self.root / f"db-{len(self.services)}.sqlite"),
             client_factory=lambda **_: model,
             tools_factory=lambda: tuple(tools),
@@ -160,7 +161,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             model.resolved = resolver.resolve(run_override=kwargs.get("run_override"))
             return model
 
-        service = AgentService(
+        service = NemoApplication(
             SQLiteRepository(self.root / "catalog.sqlite"),
             client_factory=client_factory,
             tools_factory=lambda: (),
@@ -271,7 +272,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 entered.set()
                 await asyncio.Event().wait()
 
-        service = AgentService(
+        service = NemoApplication(
             SQLiteRepository(self.root / "active.sqlite"),
             client_factory=lambda **_: BlockingModel(),
             tools_factory=lambda: (),
@@ -336,7 +337,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             project_instructions=None,
         )
         repository.create_run(run_id="r1", session_id="s1", prompt="x", max_steps=2)
-        service = AgentService(repository, client_factory=lambda **_: FakeModel([]))
+        service = NemoApplication(repository, client_factory=lambda **_: FakeModel([]))
         self.services.append(service)
         self.assertEqual(await service.startup(), ["r1"])
         self.assertEqual(service.get_run("r1")["status"], "interrupted")
@@ -347,7 +348,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             async def generate(self, request):
                 raise RuntimeError("provider internals stay private")
 
-        service = AgentService(
+        service = NemoApplication(
             SQLiteRepository(self.root / "failed.sqlite"),
             client_factory=lambda **_: BrokenModel(),
             tools_factory=lambda: (),

@@ -8,6 +8,7 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from nemo.adapters.protocols.openai_compatible import OpenAICompatibleAdapter
+from nemo.adapters.persistence import SQLiteRepository
 from nemo.adapters.tools.filesystem import (
     EditFileTool,
     ListDirTool,
@@ -16,7 +17,7 @@ from nemo.adapters.tools.filesystem import (
 )
 from nemo.adapters.tools.shell import RunShellTool
 from nemo.adapters.tools.web import FetchUrlTool, WebSearchTool
-from nemo.adapters.transport import HttpxTransport
+from nemo.adapters.httpx_transport import HttpxTransport
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.errors import ConfigError
@@ -26,6 +27,7 @@ from nemo.core.models.client import ModelClient
 from nemo.core.models.registry import ModelRegistry
 from nemo.core.models.resolver import ModelResolver
 from nemo.core.tools.registry import Tool
+from nemo.server.application import NemoApplication
 
 #: Protocols implemented as adapters. Presence here is the actual support matrix:
 #: the config contract lists every planned protocol so a wrong value fails loudly.
@@ -101,4 +103,14 @@ def build_model_client(
         adapter=build_adapter(resolved.protocol),
         transport=transport or HttpxTransport(),
         secret=loader.load(resolved.api_key_env),
+    )
+
+
+def build_server_application(database_path: Path | str) -> NemoApplication:
+    """Compose the production Server application from concrete adapters."""
+
+    return NemoApplication(
+        SQLiteRepository(database_path),
+        client_factory=build_model_client,
+        tools_factory=build_local_tools,
     )

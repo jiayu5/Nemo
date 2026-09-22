@@ -1,4 +1,4 @@
-"""HTTP transport backed by httpx.
+"""HTTP transport implemented with httpx.
 
 The client is created on first use so importing this module never depends on an
 running event loop.
