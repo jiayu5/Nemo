@@ -11,3 +11,5 @@ apps/ui/coverage/
 apps/ui/*.tsbuildinfo
 apps/ui/vite.config.js
 apps/ui/vite.config.d.ts
+apps/ui/src-tauri/binaries/nemo-server-*
+apps/ui/src-tauri/target/

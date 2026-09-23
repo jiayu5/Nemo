@@ -81,4 +81,4 @@ Settings 沿用 Nemo 三栏工作台，不新增独立后台风格：
 
 ## 7. 非目标
 
-M5c 不提供任意 headers/parameters 编辑、Alias/Profile 管理、配置导入导出、多用户冲突合并、远程 Server 管理或活动 Run 热切换。Tauri 访问凭据与 Origin 防护属于 M6。
+M5c 不提供任意 headers/parameters 编辑、Alias/Profile 管理、配置导入导出、多用户冲突合并、远程 Server 管理或活动 Run 热切换。Tauri 访问凭据与 Origin 防护已由 M6 完成，见 [macOS App](macos-app.md)。

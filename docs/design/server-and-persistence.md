@@ -77,4 +77,4 @@ Trace 由持久化事件和物化数据组装。Token 不可用时保持 `null`�
 
 ## 7. 后续
 
-M5c 增加安全配置写入；M6 增加 Tauri sidecar、短期访问凭据、Origin 检查和进程收敛。远程访问、多用户和分布式队列不在当前范围。
+M5c 增加安全配置写入；M6 增加 Tauri sidecar、短期访问凭据、Origin 检查和进程收敛（见 [macOS App](macos-app.md)）。远程访问、多用户和分布式队列不在当前范围。

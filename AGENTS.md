@@ -16,6 +16,7 @@ Phase 1 的 M1–M5 已完成，下一阶段是 M6 macOS App。权威状态见 [
 - `src/nemo/prompts/`：具名、可独立测试的系统提示条款与项目说明加载。
 - `src/nemo/testing/`：无网络 Fake Model/Tool；测试不得在各文件重复造替身。
 - `apps/ui/`：React + TypeScript + Vite 客户端；`components/` 放视图组件，`hooks/` 放页面状态与 Server 生命周期；只访问 Server，不读取 SQLite、用户配置或密钥。
+- `apps/ui/src-tauri/`：macOS 桌面壳、Python sidecar 的启动/退出与窗口权限；不得复制 Agent 逻辑。`apps/ui/build_sidecar.py` 只负责构建可打包的 Server 二进制。
 - `tests/`：平铺的 `test_*.py`；一个模块对应一个测试文件。
 - `examples/`：可运行演示，不承担生产客户端职责。
 - `docs/design/`：仍然有效的组件设计；`docs/reference/`：当前接口与配置参考；`docs/milestones/`：已完成交付的简要记录。

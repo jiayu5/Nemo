@@ -154,6 +154,34 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(trace.json()["model_calls"]), 1)
                 self.assertGreaterEqual(trace.json()["duration_ms"], 0)
 
+    async def test_desktop_access_requires_token_and_checks_origin(self):
+        service, _ = self.service([])
+        app = create_app(service=service, desktop_token="desktop-token-with-enough-entropy")
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                self.assertEqual((await client.get("/health")).status_code, 401)
+                self.assertEqual((await client.get("/openapi.json")).status_code, 401)
+                headers = {"X-Nemo-Token": "desktop-token-with-enough-entropy"}
+                self.assertEqual((await client.get("/health", headers=headers)).status_code, 200)
+                self.assertEqual((await client.get("/health", headers={
+                    **headers, "Origin": "https://untrusted.example",
+                })).status_code, 403)
+                preflight = await client.options("/health", headers={
+                    "Origin": "tauri://localhost",
+                    "Access-Control-Request-Method": "GET",
+                    "Access-Control-Request-Headers": "X-Nemo-Token",
+                })
+                self.assertEqual(preflight.status_code, 204)
+                self.assertEqual(preflight.headers["Access-Control-Allow-Origin"],
+                                 "tauri://localhost")
+                allowed = await client.get("/health", headers={
+                    **headers, "Origin": "tauri://localhost",
+                })
+                self.assertEqual(allowed.status_code, 200)
+                self.assertEqual(allowed.headers["Access-Control-Allow-Origin"],
+                                 "tauri://localhost")
+
     async def test_streamed_text_is_replayed_through_run_sse(self):
         class StreamingModel:
             async def stream(self, request):

@@ -43,6 +43,7 @@ from nemo.server.schemas import (
     UpdateSessionRequest,
 )
 from nemo.server.application import NemoApplication
+from nemo.server.desktop_access import install_desktop_access
 
 
 DEFAULT_DATABASE_PATH = Path.home() / ".nemo" / "nemo.db"
@@ -52,6 +53,7 @@ def create_app(
     *,
     database_path: Path | str | None = None,
     service: NemoApplication | None = None,
+    desktop_token: str | None = None,
 ) -> FastAPI:
     owned_service = service is None
     if service is None:
@@ -72,6 +74,8 @@ def create_app(
                 await agent_service.shutdown()
 
     app = FastAPI(title="Nemo Server", version="0.1.0", lifespan=lifespan)
+    if desktop_token is not None:
+        install_desktop_access(app, desktop_token)
 
     @app.exception_handler(RequestValidationError)
     async def safe_validation_error(

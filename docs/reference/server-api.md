@@ -8,6 +8,22 @@ conda run -n nemo python -m nemo.server
 
 可选参数：`--host` 只接受 loopback 地址，`--port` 修改端口，`--database` 修改 SQLite 路径。`NEMO_SERVER_PORT` 同时决定 Server、CLI 和 Vite 开发代理的默认端口；改变它后需要重新启动各进程。若端口已有 Nemo Server，重复启动会直接提示已有实例；若是其他进程占用，会提示选择其他端口。
 
+## 桌面 sidecar 访问条件
+
+打包的 `Nemo.app` 由 Tauri 启动 `nemo.server.desktop`，它不是上面的命令行 Server：
+
+| 项 | 桌面 sidecar |
+|---|---|
+| 数据库 | `~/.nemo/desktop.db`，与 CLI Server 的 `~/.nemo/nemo.db` 相互独立 |
+| 地址 | `127.0.0.1` 上由系统分配的空闲端口，就绪后向 stdout 输出 `NEMO_READY:<port>` |
+| 启动令牌 | Tauri 生成并放入子进程环境变量 `NEMO_DESKTOP_TOKEN`；缺失或长度不足 24 时拒绝启动 |
+| 请求凭据 | 所有路径（含 `/health`、`/openapi.json`、SSE）都要求请求头 `X-Nemo-Token`，不匹配返回 `401` |
+| Origin | 只接受 `tauri://localhost`、`http://tauri.localhost`、`http://127.0.0.1:5173`；其他 Origin 返回 `403` |
+| 预检 | 允许的 Origin 的 `OPTIONS` 返回 `204`，允许 `Content-Type`、`X-Nemo-Token`、`Last-Event-ID` |
+| 退出 | App 退出时结束 sidecar；Python 同时监测父进程，父进程消失即自行关闭 |
+
+令牌只存在于 Rust、Python 进程内存和已加载窗口内，不写入仓库、配置或数据库。普通 CLI Server 与浏览器开发模式不使用令牌，也不受 Origin 白名单约束。Origin 检查只是浏览器层的附加限制，真正的访问凭据是随机令牌；它不是操作系统沙箱。
+
 ## Prompt 如何传递
 
 用户输入通过 JSON 请求体发送：
@@ -123,4 +139,4 @@ Server 不解析 `:mode` 等上层 UI 命令；它只处理明确的资源和动
 
 ## 当前安全边界
 
-Server 仅允许绑定 `127.0.0.1`、`localhost` 或 `::1`，但还没有请求认证和 Origin 检查。开发态 UI 使用 Vite `/api` 代理保持同源；M6 将由 Tauri sidecar 注入短期访问凭据并收紧 Origin。
+Server 仅允许绑定 `127.0.0.1`、`localhost` 或 `::1`。命令行 Server 与浏览器开发模式没有请求认证和 Origin 检查；开发态 UI 使用 Vite `/api` 代理保持同源。打包应用由 Tauri sidecar 注入每次启动生成的 `X-Nemo-Token` 并收紧 Origin，见 [桌面 sidecar 访问条件](#桌面-sidecar-访问条件)。

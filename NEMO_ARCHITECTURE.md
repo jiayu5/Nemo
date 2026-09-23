@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 / M1–M5 已完成；下一阶段是 M6 macOS App。
+> 当前状态：Phase 1 / M1–M6 已完成；桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -76,7 +76,7 @@ flowchart TB
 | Tool Core | `core/tools/` | 注册、参数校验、审批策略、路径与输出约束 | 具体文件或进程 I/O |
 | Adapters | `adapters/` | 协议、HTTP、持久化、Filesystem、Shell、Web | Agent Loop |
 | Application | `server/` | 应用外观及 Session、Run、Catalog、Trace、Settings 用例；HTTP/SSE | 第二套 Runtime |
-| Clients | `cli/`、`apps/ui/` | 用户输入、显示、交互式审批；UI 状态和视图组件 | 直接访问数据库和密钥 |
+| Clients | `cli/`、`apps/ui/`、`apps/ui/src-tauri/` | 用户输入、显示、交互式审批；UI 状态、视图组件与桌面窗口/sidecar 生命周期 | 直接访问数据库和密钥 |
 | Bootstrap | `bootstrap.py` | 唯一的具体依赖装配入口 | 领域逻辑 |
 
 依赖方向始终从外向内：客户端和 Server 可依赖 Core；Core 不反向依赖它们。
@@ -178,7 +178,7 @@ SQLite 保存 Sessions、Messages、Runs、Approvals、Events，以及 Step 和 
 - 密钥只从进程环境或 `~/.nemo/.env` 解析，不进入 SQLite、事件或 API 响应。
 - Provider API 只暴露安全元数据和密钥是否已配置；URL 的 userinfo、query 和 fragment 不返回。
 - 日志、错误与事件使用安全摘要，不返回原始异常或请求 header。
-- Server 当前只允许 loopback host，但还没有访问凭据和 Origin 检查；这些与 Tauri sidecar 一并在 M6 完成。
+- Server 只允许 loopback host。桌面 sidecar 额外要求每次启动生成的 `X-Nemo-Token` 并检查 Origin；浏览器开发模式与 CLI 继续依赖本机 loopback，不使用该令牌。
 - 远程 Provider 会接收模型请求上下文；“本地运行”不代表数据不会离开本机。
 
 ## 7. 目标演进
@@ -206,7 +206,7 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M3 · Local Execution | 已完成 | 文件、Shell、Web 工具与执行边界 |
 | M4 · Context、CLI、Server | 已完成 | 稳定上下文、Session、审批、SQLite、HTTP/SSE |
 | M5 · React UI | 已完成 | 查询 API、React UI、Provider Settings 与安全配置写入 |
-| M6 · macOS App | 未开始 | Tauri、Python sidecar、访问保护、打包和进程收敛 |
+| M6 · macOS App | 已完成 | Tauri、Python sidecar、访问保护、打包和进程收敛 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

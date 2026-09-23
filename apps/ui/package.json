@@ -7,15 +7,20 @@
     "dev": "vite --config vite.config.ts",
     "build": "npm run typecheck && vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit -p tsconfig.app.json --pretty false && tsc --noEmit -p tsconfig.node.json --pretty false",
-    "test": "vitest --config vite.config.ts"
+    "test": "vitest --config vite.config.ts",
+    "desktop:sidecar": "conda run -n nemo python build_sidecar.py",
+    "desktop:dev": "npm run desktop:sidecar && tauri dev",
+    "desktop:build": "npm run desktop:sidecar && tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.11.1",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.11.5",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.3.0",
     "@types/react": "^19.1.0",

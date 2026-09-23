@@ -63,4 +63,4 @@ M5c 已按上述边界实现。高级 Alias、Profile、headers 和 parameters �
 
 ## 7. 非目标
 
-当前不做语法高亮、多窗口、远程部署认证或 Tauri 打包。桌面进程与本地 API 防护属于 M6。
+当前不做语法高亮、多窗口和远程部署认证。桌面打包与本地 API 防护已由 M6 完成，见 [macOS App](macos-app.md)。

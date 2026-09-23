@@ -1,5 +1,6 @@
-# Python dependency snapshot validated for Nemo M4; excludes local editable package.
-# Covers the full transitive closure of pyproject.toml dependencies.
+# Python dependency snapshot for runtime and the M6 desktop build.
+# Excludes the local editable package; covers runtime and desktop extra dependencies.
+altgraph==0.17.5
 annotated-doc==0.0.5
 annotated-types==0.8.0
 anyio==4.15.1
@@ -10,8 +11,13 @@ h11==0.16.0
 httpcore==1.0.9
 httpx==0.28.1
 idna==3.19
+macholib==1.16.4
+packaging==26.3
 pydantic==2.13.5
 pydantic-core==2.46.5
+pyinstaller==6.22.3
+pyinstaller-hooks-contrib==2026.7
+setuptools==84.0.0
 starlette==1.6.0
 typing-extensions==4.16.0
 typing-inspection==0.4.4

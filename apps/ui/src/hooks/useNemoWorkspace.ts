@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { api, subscribeToRun } from "../api";
+import { api, defaultWorkspace, subscribeToRun } from "../api";
+import type { RunSubscription } from "../api";
 import { isTerminalRunEvent } from "../events";
 import type {
   ApprovalMode,
@@ -37,7 +38,7 @@ export function useNemoWorkspace() {
   const [workspace, setWorkspace] = useState(".");
   const [prompt, setPrompt] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const streamRef = useRef<EventSource | null>(null);
+  const streamRef = useRef<RunSubscription | null>(null);
 
   async function finishRun(runId: string, sessionId: string) {
     streamRef.current?.close();
@@ -156,6 +157,14 @@ export function useNemoWorkspace() {
     setModels(modelItems);
     setProviders(providerItems);
     return settings;
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    void defaultWorkspace().then((value) => {
+      if (!cancelled) setWorkspace((current) => (current === "." ? value : current));
+    });
+    return () => { cancelled = true; };
   }, []);
 
   useEffect(() => {

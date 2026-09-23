@@ -1,3 +1,4 @@
+import { invoke, isTauri } from "@tauri-apps/api/core";
 import type {
   ApprovalMode,
   Message,
@@ -12,16 +13,54 @@ import type {
   Session,
   Trace,
 } from "./types";
-import { RUN_EVENT_TYPES } from "./events";
+import { isTerminalRunEvent, RUN_EVENT_TYPES } from "./events";
 
 const API = "/api";
 
+interface DesktopConnection {
+  port: number;
+  token: string;
+  workspace: string;
+}
+
+let desktopConnection: Promise<DesktopConnection> | null = null;
+
+function desktop(): Promise<DesktopConnection> {
+  desktopConnection ??= invoke<DesktopConnection>("desktop_connection").catch((error: unknown) => {
+    desktopConnection = null;
+    throw error;
+  });
+  return desktopConnection;
+}
+
+async function endpoint(): Promise<{ base: string; headers: HeadersInit }> {
+  if (!isTauri()) return { base: API, headers: {} };
+  const { port, token } = await desktop();
+  return { base: `http://127.0.0.1:${port}`, headers: { "X-Nemo-Token": token } };
+}
+
+/**
+ * Default workspace for a new session: the sidecar's own directory is meaningless
+ * inside a bundle, so the desktop shell reports the user's home directory instead.
+ */
+export async function defaultWorkspace(): Promise<string> {
+  if (!isTauri()) return ".";
+  try {
+    return (await desktop()).workspace;
+  } catch {
+    return ".";
+  }
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(`${API}${path}`, {
+  const target = await endpoint();
+  const response = await fetch(`${target.base}${path}`, {
     ...init,
-    headers: init?.body
-      ? { "Content-Type": "application/json", ...init.headers }
-      : init?.headers,
+    headers: {
+      ...target.headers,
+      ...(init?.body ? { "Content-Type": "application/json" } : {}),
+      ...init?.headers,
+    },
   });
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
@@ -105,12 +144,17 @@ export const api = {
   trace: (runId: string) => request<Trace>(`/runs/${runId}/trace`),
 };
 
+export interface RunSubscription {
+  close(): void;
+}
+
 export function subscribeToRun(
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError: () => void,
   after = 0,
-): EventSource {
+): RunSubscription {
+  if (isTauri()) return subscribeDesktop(runId, onEvent, onError, after);
   const source = new EventSource(`${API}/runs/${runId}/events?after=${after}`);
   for (const type of RUN_EVENT_TYPES) {
     source.addEventListener(type, (message) => {
@@ -119,6 +163,67 @@ export function subscribeToRun(
   }
   source.onerror = onError;
   return source;
+}
+
+function subscribeDesktop(
+  runId: string,
+  onEvent: (event: RunEvent) => void,
+  onError: () => void,
+  after: number,
+): RunSubscription {
+  const abort = new AbortController();
+  let cursor = after;
+  let finished = false;
+
+  const readEvents = async () => {
+    while (!abort.signal.aborted && !finished) {
+      try {
+        const target = await endpoint();
+        const response = await fetch(`${target.base}/runs/${runId}/events?after=${cursor}`, {
+          headers: target.headers,
+          signal: abort.signal,
+        });
+        if (!response.ok || !response.body) throw new Error("Event stream unavailable");
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+        while (!abort.signal.aborted) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buffer += decoder.decode(value, { stream: true });
+          buffer = buffer.replace(/\r\n/g, "\n");
+          let separator = buffer.indexOf("\n\n");
+          while (separator !== -1) {
+            const block = buffer.slice(0, separator);
+            buffer = buffer.slice(separator + 2);
+            const data = block.split("\n")
+              .filter((line) => line.startsWith("data:"))
+              .map((line) => line.slice(5).trimStart()).join("\n");
+            if (data) {
+              const event = JSON.parse(data) as RunEvent;
+              cursor = Math.max(cursor, event.seq);
+              onEvent(event);
+              if (isTerminalRunEvent(event.type)) {
+                finished = true;
+                break;
+              }
+            }
+            separator = buffer.indexOf("\n\n");
+          }
+          if (finished) break;
+        }
+        if (finished || abort.signal.aborted) return;
+        throw new Error("Event stream ended before run completed");
+      } catch {
+        if (abort.signal.aborted || finished) return;
+        onError();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+  };
+
+  void readEvents();
+  return { close: () => abort.abort() };
 }
 
 export function formatDuration(value: number | null): string {
