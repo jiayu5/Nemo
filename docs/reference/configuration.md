@@ -1,6 +1,6 @@
 # 配置参考
 
-本文描述当前代码实际读取的模型配置、密钥和网络环境。图形化编辑尚未实现；M5c 完成前需要手动维护这些文件。
+本文描述当前代码实际读取的模型配置、密钥和网络环境。常用 Provider/Model/API Key/Proxy 可在 React UI 的 **Connections** 中维护；高级字段仍可手工编辑。
 
 ## 文件与优先级
 
@@ -21,6 +21,7 @@ default = "chat"
 protocol = "openai_compatible"
 base_url = "https://api.example.com/v1"
 api_key_env = "EXAMPLE_API_KEY"
+proxy_env = "NEMO_HTTPS_PROXY"
 timeout_seconds = 60
 
 [models.example-chat]
@@ -45,6 +46,7 @@ temperature = 0.1
 
 ```dotenv
 EXAMPLE_API_KEY=replace-with-your-key
+NEMO_HTTPS_PROXY=http://127.0.0.1:7890
 ```
 
 ```bash
@@ -60,6 +62,7 @@ chmod 600 ~/.nemo/.env
 | `protocol` | 是 | 当前可运行值只有 `openai_compatible` |
 | `base_url` | 是 | HTTP(S) API 根路径；末尾 `/` 会被移除 |
 | `api_key_env` | 是 | 密钥变量名，不是密钥值 |
+| `proxy_env` | 否 | 显式 Proxy 变量名；值从进程环境或 `~/.nemo/.env` 读取 |
 | `headers` | 否 | 静态请求 header；默认空字典 |
 | `timeout_seconds` | 否 | 单次模型请求超时，默认 `60`，必须大于 0 |
 
@@ -86,7 +89,7 @@ chmod 600 ~/.nemo/.env
 
 ## Proxy
 
-模型请求和 Web 工具使用 `httpx`。默认客户端会读取标准进程环境变量：
+模型请求和 Web 工具使用 `httpx`。Provider 未设置 `proxy_env` 时，默认客户端继续读取标准进程环境变量：
 
 - `HTTP_PROXY`
 - `HTTPS_PROXY`
@@ -102,7 +105,7 @@ NO_PROXY=127.0.0.1,localhost \
 conda run -n nemo python -m nemo.server
 ```
 
-Proxy 必须存在于 **Nemo Server 的进程环境**。`~/.nemo/.env` 当前由 `SecretLoader` 按名称读取，它不会把内容注入 `os.environ`；因此把 `HTTPS_PROXY` 只写进该文件不会让 `httpx` 自动使用它。这是当前实现边界，不应在文档中描述成已支持的 `.env` Proxy 功能。
+Provider 设置了 `proxy_env` 后，Nemo 使用与 API Key 相同的解析顺序：Server 进程环境优先，`~/.nemo/.env` 回退。值只交给该 Provider 的 HTTP client，不注入全局 `os.environ`。这适合只让特定模型端点经过 VPN/Proxy；标准变量则继续影响所有遵循 `httpx` 环境规则的请求。
 
 客户端访问本地 Server 通常不应走代理，所以建议保留 `NO_PROXY=127.0.0.1,localhost`。
 
@@ -111,5 +114,6 @@ Proxy 必须存在于 **Nemo Server 的进程环境**。`~/.nemo/.env` 当前由
 - 不把真实 `config.toml`、`.env`、密钥或带凭据 URL 提交到仓库。
 - `headers` 位于非密钥配置文件；当前没有 header 的 Secret 引用机制，因此不要把长期凭据写进静态 header。
 - Server API 只返回 `api_key_env` 和 `secret_configured`，不回显密钥或 header。
+- Connections 只返回 `environment`、`file` 或缺失状态；环境变量来源不能由 UI 覆盖或删除。
 - Provider URL 对外显示前会移除 userinfo、query 和 fragment。
-- 配置修改后应重启当前 Server；M5c 尚未提供安全写入和热重载流程。
+- UI 保存先校验完整候选配置，再原子替换文件；新 Run 立即读取新配置，活动 Run 保持原 Model Client。

@@ -1,10 +1,13 @@
+import { useState } from "react";
 import { Conversation } from "./components/Conversation";
+import { InspectorPanel } from "./components/InspectorPanel";
+import type { InspectorView } from "./components/InspectorPanel";
 import { SessionSidebar } from "./components/SessionSidebar";
-import { TracePanel } from "./components/TracePanel";
 import { useNemoWorkspace } from "./hooks/useNemoWorkspace";
 
 export default function App() {
   const workspace = useNemoWorkspace();
+  const [inspectorView, setInspectorView] = useState<InspectorView>("activity");
 
   return (
     <div className="app-shell">
@@ -19,6 +22,11 @@ export default function App() {
             {workspace.selected?.workspace.split("/").filter(Boolean).at(-1) ?? "No session"}
           </span>
         </div>
+        <button
+          className="settings-toggle"
+          type="button"
+          onClick={() => setInspectorView("connections")}
+        >Connections</button>
         <span className={`server-pill ${workspace.serverOnline ? "online" : "offline"}`}>
           <i /> {workspace.serverOnline ? "Server online" : "Server offline"}
         </span>
@@ -49,12 +57,15 @@ export default function App() {
           onModeChange={(mode) => void workspace.updateMode(mode)}
           onModelChange={(model) => void workspace.updateModel(model)}
         />
-        <TracePanel
+        <InspectorPanel
+          view={inspectorView}
+          onViewChange={setInspectorView}
           runs={workspace.runs}
           trace={workspace.trace}
           events={workspace.events}
-          providers={workspace.providers}
+          settings={workspace.providerSettings}
           onSelectRun={(run) => void workspace.selectRun(run)}
+          onSettingsSaved={workspace.refreshConfiguration}
         />
       </main>
 

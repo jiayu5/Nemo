@@ -2,6 +2,7 @@ import asyncio
 import json
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
 import httpx
@@ -49,6 +50,7 @@ default = "chat"
 protocol = "openai_compatible"
 base_url = "https://api.deepseek.com/v1"
 api_key_env = "DEMO_API_KEY"
+proxy_env = "NEMO_PROXY"
 headers = { "X-Tenant" = "nemo" }
 
 [providers.mirror]
@@ -170,6 +172,7 @@ class ResolverTests(ModelTestCase):
         self.assertEqual(
             self.resolver.resolve().headers, {"X-Tenant": "nemo"}
         )
+        self.assertEqual(self.resolver.resolve().proxy_env, "NEMO_PROXY")
 
     def test_unknown_selection(self):
         with self.assertRaises(UnknownReferenceError):
@@ -523,3 +526,11 @@ class HttpxTransportTests(unittest.TestCase):
             self.post(handler)
         self.assertIn("ConnectError", str(caught.exception))
         self.assertNotIn(SECRET, str(caught.exception))
+
+    def test_explicit_proxy_is_revealed_only_to_httpx(self):
+        proxy = SecretValue("http://proxy-user:proxy-pass@127.0.0.1:7890")
+        with patch("nemo.adapters.httpx_transport.httpx.AsyncClient") as factory:
+            transport = HttpxTransport(proxy=proxy)
+            transport._ensure_client()
+        factory.assert_called_once_with(proxy=proxy.reveal())
+        self.assertNotIn("proxy-pass", repr(proxy))

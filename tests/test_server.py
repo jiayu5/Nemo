@@ -10,6 +10,8 @@ import httpx
 from nemo.adapters.persistence import SQLiteRepository
 from nemo.server.errors import ActiveRunError
 from nemo.adapters.tools.filesystem import WriteFileTool
+from nemo.config.editor import ConfigEditor
+from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.model_config import AppConfig
 from nemo.core.contracts.types import ModelResponse, ToolCall
@@ -228,6 +230,174 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(tested.status_code, 200)
                 self.assertEqual(tested.json()["selection"], "chat")
                 self.assertGreaterEqual(tested.json()["latency_ms"], 0)
+
+    async def test_provider_settings_validate_save_and_hot_reload(self):
+        config_path = self.root / "settings.toml"
+        secret_path = self.root / ".env"
+        editor = ConfigEditor(
+            config_path=config_path,
+            secret_path=secret_path,
+            environ={},
+        )
+        service = NemoApplication(
+            SQLiteRepository(self.root / "settings.sqlite"),
+            client_factory=lambda **_: FakeModel([ModelResponse(content="OK")]),
+            tools_factory=lambda: (),
+            config_loader=lambda: load_config(config_path),
+            secret_loader_factory=lambda: SecretLoader(
+                env_file=secret_path, environ={}
+            ),
+            config_editor=editor,
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        request = {
+            "protocol": "openai_compatible",
+            "base_url": "https://example.test/v1",
+            "api_key_env": "DEMO_API_KEY",
+            "proxy_env": "NEMO_PROXY",
+            "timeout_seconds": 45,
+            "model_name": "demo-model",
+            "model_id": "demo-v1",
+            "tool_calling": True,
+            "make_default": True,
+            "api_key": {"action": "replace", "value": "private-key-value"},
+            "proxy": {"action": "replace", "value": "http://127.0.0.1:7890"},
+        }
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                empty = await client.get("/settings/providers")
+                self.assertEqual(empty.json(), {
+                    "config_exists": False,
+                    "default": None,
+                    "providers": [],
+                })
+                preview = await client.post(
+                    "/settings/providers/demo/validate", json=request
+                )
+                self.assertEqual(preview.status_code, 200)
+                self.assertEqual(preview.json()["status"], "valid")
+                self.assertFalse(config_path.exists())
+                self.assertNotIn("private-key-value", preview.text)
+
+                saved = await client.put("/settings/providers/demo", json=request)
+                self.assertEqual(saved.status_code, 200)
+                self.assertEqual(saved.json()["status"], "saved")
+                self.assertNotIn("private-key-value", saved.text)
+                self.assertEqual(secret_path.stat().st_mode & 0o777, 0o600)
+
+                settings = (await client.get("/settings/providers")).json()
+                provider = settings["providers"][0]
+                self.assertEqual(provider["api_key_source"], "file")
+                self.assertEqual(provider["proxy_source"], "file")
+                self.assertEqual(provider["models"][0]["model_id"], "demo-v1")
+
+                providers = (await client.get("/providers")).json()
+                models = (await client.get("/models")).json()
+                self.assertEqual(providers[0]["proxy_env"], "NEMO_PROXY")
+                self.assertTrue(providers[0]["proxy_configured"])
+                self.assertEqual(models[0]["selection"], "demo-model")
+
+                unsafe = dict(request)
+                unsafe["timeout_seconds"] = -1
+                unsafe["api_key"] = {
+                    "action": "replace",
+                    "value": "must-not-appear-in-validation",
+                }
+                rejected = await client.put(
+                    "/settings/providers/demo", json=unsafe
+                )
+                self.assertEqual(rejected.status_code, 422)
+                self.assertNotIn("must-not-appear-in-validation", rejected.text)
+
+    async def test_provider_settings_reject_environment_secret_mutation(self):
+        editor = ConfigEditor(
+            config_path=self.root / "environment.toml",
+            secret_path=self.root / ".env",
+            environ={"DEMO_API_KEY": "process-secret"},
+        )
+        service = NemoApplication(
+            SQLiteRepository(self.root / "environment.sqlite"),
+            client_factory=lambda **_: FakeModel([]),
+            config_editor=editor,
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        request = {
+            "protocol": "openai_compatible",
+            "base_url": "https://example.test/v1",
+            "api_key_env": "DEMO_API_KEY",
+            "model_name": "demo",
+            "model_id": "demo",
+            "api_key": {"action": "delete"},
+        }
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.put("/settings/providers/demo", json=request)
+        self.assertEqual(response.status_code, 422)
+        self.assertIn("read-only", response.text)
+        self.assertNotIn("process-secret", response.text)
+        self.assertFalse(editor.config_path.exists())
+
+    async def test_provider_settings_delete_cascades_config_but_keeps_secrets(self):
+        config_path = self.root / "delete.toml"
+        secret_path = self.root / ".env"
+        config_path.write_text(
+            """
+default = "primary"
+
+[providers.one]
+protocol = "openai_compatible"
+base_url = "https://one.example/v1"
+api_key_env = "ONE_API_KEY"
+
+[providers.two]
+protocol = "openai_compatible"
+base_url = "https://two.example/v1"
+api_key_env = "TWO_API_KEY"
+
+[models.primary]
+provider = "one"
+model_id = "one-v1"
+
+[models.backup]
+provider = "two"
+model_id = "two-v1"
+
+[aliases]
+fast = "primary"
+
+[profiles.chat]
+model = "primary"
+""",
+            encoding="utf-8",
+        )
+        secret_path.write_text("ONE_API_KEY=keep-me\n", encoding="utf-8")
+        editor = ConfigEditor(config_path=config_path, secret_path=secret_path, environ={})
+        service = NemoApplication(
+            SQLiteRepository(self.root / "delete.sqlite"),
+            client_factory=lambda **_: FakeModel([]),
+            config_editor=editor,
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                deleted = await client.delete("/settings/providers/one")
+                self.assertEqual(deleted.status_code, 200)
+                self.assertEqual(deleted.json()["removed_models"], ["primary"])
+                self.assertEqual(deleted.json()["default"], "backup")
+                self.assertEqual((await client.delete("/settings/providers/two")).status_code, 409)
+                self.assertEqual((await client.delete("/settings/providers/missing")).status_code, 404)
+
+        config = load_config(config_path)
+        self.assertEqual(list(config.providers), ["two"])
+        self.assertEqual(config.aliases, {})
+        self.assertEqual(config.profiles, {})
+        self.assertEqual(secret_path.read_text(encoding="utf-8"), "ONE_API_KEY=keep-me\n")
 
     async def test_existing_database_is_migrated_with_model_identity_columns(self):
         path = self.root / "old.sqlite"

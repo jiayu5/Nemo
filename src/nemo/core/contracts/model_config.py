@@ -15,6 +15,7 @@ Capability = Literal["tool_calling", "streaming"]
 SelectionSource = Literal["run", "session", "agent", "default"]
 
 NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
+EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 
 #: Parameters a caller may not set: the adapter owns them.
 RESERVED_MODEL_PARAMETERS = frozenset({"model", "messages", "tools", "stream"})
@@ -25,7 +26,8 @@ class ProviderConfig(Contract):
 
     protocol: ProtocolName
     base_url: NonEmptyStr
-    api_key_env: NonEmptyStr
+    api_key_env: EnvName
+    proxy_env: EnvName | None = None
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = Field(default=60.0, gt=0)
 
@@ -75,6 +77,7 @@ class ResolvedModel(Contract):
     protocol: ProtocolName
     base_url: str
     api_key_env: str
+    proxy_env: str | None = None
     capabilities: frozenset[Capability] = frozenset()
     parameters: dict[str, Any] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)

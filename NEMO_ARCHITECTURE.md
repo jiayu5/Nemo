@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 / M5 进行中。M1–M4、M5a 和 M5b 已完成；M5c Provider Settings 与 M6 macOS App 尚未实现。
+> 当前状态：Phase 1 / M1–M5 已完成；下一阶段是 M6 macOS App。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -27,7 +27,7 @@ flowchart TB
         API["HTTP Commands / Queries"]
         SSE["SSE Events"]
         APP["NemoApplication"]
-        USECASES["Session / Run / Catalog / Trace"]
+        USECASES["Session / Run / Catalog / Trace / Settings"]
         API --> APP --> USECASES
     end
 
@@ -75,7 +75,7 @@ flowchart TB
 | Model | `core/models/` | Registry、Resolver、统一 Model Client | 厂商判断、密钥持久化 |
 | Tool Core | `core/tools/` | 注册、参数校验、审批策略、路径与输出约束 | 具体文件或进程 I/O |
 | Adapters | `adapters/` | 协议、HTTP、持久化、Filesystem、Shell、Web | Agent Loop |
-| Application | `server/` | 应用外观及 Session、Run、Catalog、Trace 用例；HTTP/SSE | 第二套 Runtime |
+| Application | `server/` | 应用外观及 Session、Run、Catalog、Trace、Settings 用例；HTTP/SSE | 第二套 Runtime |
 | Clients | `cli/`、`apps/ui/` | 用户输入、显示、交互式审批；UI 状态和视图组件 | 直接访问数据库和密钥 |
 | Bootstrap | `bootstrap.py` | 唯一的具体依赖装配入口 | 领域逻辑 |
 
@@ -167,6 +167,8 @@ Reminder 只添加到当前请求，不写入 Session，避免随历史累积或
 
 Server 是 Session、Run、审批和持久化的唯一生命周期所有者。同一 Session 同时只允许一个活动 Run；SSE 断线不会取消执行，客户端可通过事件序号继续读取。
 
+Provider Settings 通过 Server 校验候选配置，并以原子替换写入 `~/.nemo/config.toml` 与权限为 `0600` 的 `~/.nemo/.env`。环境变量是只读高优先级来源；保存后的配置用于新 Run，活动 Run 不热切换。
+
 SQLite 保存 Sessions、Messages、Runs、Approvals、Events，以及 Step 和 Tool Call 的查询视图。Prompt 由 HTTP JSON 进入内存并立即写入脱敏后的 Run 记录；Run 正常收敛时，本轮完整消息再追加到 Session 历史。不会生成独立的 Prompt JSON 文件。完整接口见 [Server API](docs/reference/server-api.md)。
 
 安全边界：
@@ -201,7 +203,7 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M2 · Model System | 进行中 | 配置、密钥、Resolver、Model Client；当前实现 `openai_compatible` |
 | M3 · Local Execution | 已完成 | 文件、Shell、Web 工具与执行边界 |
 | M4 · Context、CLI、Server | 已完成 | 稳定上下文、Session、审批、SQLite、HTTP/SSE |
-| M5 · React UI | 进行中 | M5a 查询 API、M5b UI 已完成；M5c Provider Settings 待做 |
+| M5 · React UI | 已完成 | 查询 API、React UI、Provider Settings 与安全配置写入 |
 | M6 · macOS App | 未开始 | Tauri、Python sidecar、访问保护、打包和进程收敛 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。

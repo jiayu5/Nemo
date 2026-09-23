@@ -1,12 +1,15 @@
 import os
 import tempfile
 import unittest
+from unittest.mock import patch
 from pathlib import Path
 
+from nemo.config.editor import ConfigEditor, render_toml
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.errors import ConfigError, MissingSecretError, UnknownReferenceError
 from nemo.core.contracts.secrets import SecretValue
+from nemo.core.contracts.model_config import ModelConfig, ProviderConfig
 
 VALID_CONFIG = """
 default = "chat"
@@ -168,3 +171,194 @@ class SecretLoaderTests(ConfigTestCase):
         self.assertIsNone(loader.permission_warning())
         env_file.unlink()
         self.assertIsNone(loader.permission_warning())
+
+
+class ConfigEditorTests(ConfigTestCase):
+    def editor(self, *, environ=None):
+        return ConfigEditor(
+            config_path=self.dir / "config.toml",
+            secret_path=self.dir / ".env",
+            environ=environ or {},
+        )
+
+    def test_candidate_preserves_advanced_fields_and_round_trips(self):
+        config_path = self.write(
+            VALID_CONFIG.replace(
+                'api_key_env = "DEMO_API_KEY"',
+                'api_key_env = "DEMO_API_KEY"\nheaders = { "X-Tenant" = "nemo" }',
+            ).replace(
+                'capabilities = ["tool_calling"]',
+                'capabilities = ["tool_calling"]\n\n[models.chat-model.parameters]\ntop_p = 0.8',
+            )
+        )
+        editor = self.editor()
+        candidate = editor.candidate(
+            provider_id="deepseek",
+            provider=ProviderConfig(
+                protocol="openai_compatible",
+                base_url="https://new.example/v1",
+                api_key_env="DEMO_API_KEY",
+                proxy_env="NEMO_PROXY",
+                timeout_seconds=30,
+            ),
+            model_name="chat-model",
+            model=ModelConfig(
+                provider="deepseek",
+                model_id="new-chat",
+                capabilities=frozenset({"tool_calling"}),
+            ),
+            make_default=False,
+        )
+        rendered = render_toml(candidate)
+        config_path.write_text(rendered, encoding="utf-8")
+        reloaded = load_config(config_path)
+        self.assertEqual(reloaded.providers["deepseek"].headers, {"X-Tenant": "nemo"})
+        self.assertEqual(reloaded.providers["deepseek"].proxy_env, "NEMO_PROXY")
+        self.assertEqual(reloaded.models["chat-model"].parameters, {"top_p": 0.8})
+        self.assertEqual(reloaded.profiles["chat"].model, "chat-model")
+
+    def test_candidate_rejects_moving_a_model_between_providers(self):
+        self.write(VALID_CONFIG)
+        with self.assertRaises(ConfigError) as caught:
+            self.editor().candidate(
+                provider_id="other",
+                provider=ProviderConfig(
+                    protocol="openai_compatible",
+                    base_url="https://other.example/v1",
+                    api_key_env="OTHER_API_KEY",
+                ),
+                model_name="chat-model",
+                model=ModelConfig(provider="other", model_id="other-chat"),
+                make_default=False,
+            )
+        self.assertIn("already belongs to provider", str(caught.exception))
+
+    def test_first_provider_and_secrets_are_written_atomically(self):
+        editor = self.editor()
+        candidate = editor.candidate(
+            provider_id="demo",
+            provider=ProviderConfig(
+                protocol="openai_compatible",
+                base_url="https://example.test/v1",
+                api_key_env="DEMO_KEY",
+                proxy_env="DEMO_PROXY",
+            ),
+            model_name="demo-model",
+            model=ModelConfig(
+                provider="demo",
+                model_id="demo-v1",
+                capabilities=frozenset({"tool_calling"}),
+            ),
+            make_default=True,
+        )
+        editor.save(
+            candidate,
+            {
+                "DEMO_KEY": ("replace", 'key "with quotes"'),
+                "DEMO_PROXY": ("replace", "http://127.0.0.1:7890"),
+            },
+        )
+        self.assertEqual(load_config(editor.config_path).default, "demo-model")
+        loader = SecretLoader(env_file=editor.secret_path, environ={})
+        self.assertEqual(loader.load("DEMO_KEY").reveal(), 'key "with quotes"')
+        self.assertEqual(loader.load("DEMO_PROXY").reveal(), "http://127.0.0.1:7890")
+        self.assertEqual(editor.secret_path.stat().st_mode & 0o777, 0o600)
+
+    def test_env_edit_preserves_comments_and_unrelated_values(self):
+        env_path = self.write("# keep\nOTHER=value\nDEMO_KEY=old\n", name=".env")
+        editor = self.editor()
+        candidate = editor.candidate(
+            provider_id="demo",
+            provider=ProviderConfig(
+                protocol="openai_compatible",
+                base_url="https://example.test/v1",
+                api_key_env="DEMO_KEY",
+            ),
+            model_name="demo",
+            model=ModelConfig(provider="demo", model_id="demo"),
+            make_default=True,
+        )
+        editor.save(candidate, {"DEMO_KEY": ("delete", None)})
+        self.assertEqual(env_path.read_text(), "# keep\nOTHER=value\n")
+
+    def test_process_environment_is_read_only(self):
+        editor = self.editor(environ={"DEMO_KEY": "from-process"})
+        candidate = editor.candidate(
+            provider_id="demo",
+            provider=ProviderConfig(
+                protocol="openai_compatible",
+                base_url="https://example.test/v1",
+                api_key_env="DEMO_KEY",
+            ),
+            model_name="demo",
+            model=ModelConfig(provider="demo", model_id="demo"),
+            make_default=True,
+        )
+        with self.assertRaises(ConfigError) as caught:
+            editor.save(candidate, {"DEMO_KEY": ("delete", None)})
+        self.assertIn("read-only", str(caught.exception))
+        self.assertFalse(editor.config_path.exists())
+
+    def test_delete_provider_removes_models_and_repoints_default(self):
+        self.write(
+            VALID_CONFIG
+            + """
+[providers.backup]
+protocol = "openai_compatible"
+base_url = "https://backup.example/v1"
+api_key_env = "BACKUP_API_KEY"
+
+[models.backup-model]
+provider = "backup"
+model_id = "backup-v1"
+"""
+        )
+        editor = self.editor()
+        candidate, removed = editor.without_provider("deepseek")
+        self.assertEqual(removed, ["chat-model", "plain-model"])
+        self.assertEqual(list(candidate.providers), ["backup"])
+        self.assertEqual(list(candidate.models), ["backup-model"])
+        self.assertEqual(candidate.aliases, {})
+        self.assertEqual(candidate.profiles, {})
+        self.assertEqual(candidate.default, "backup-model")
+
+    def test_delete_last_provider_is_rejected(self):
+        self.write(VALID_CONFIG)
+        with self.assertRaises(ConfigError) as caught:
+            self.editor().without_provider("deepseek")
+        self.assertIn("last configured model", str(caught.exception))
+
+    def test_failed_secret_write_restores_the_previous_config(self):
+        config_path = self.write(VALID_CONFIG)
+        env_path = self.write("DEMO_API_KEY=old\n", name=".env")
+        old_config = config_path.read_text()
+        old_env = env_path.read_text()
+        editor = self.editor()
+        candidate = editor.candidate(
+            provider_id="deepseek",
+            provider=ProviderConfig(
+                protocol="openai_compatible",
+                base_url="https://changed.example/v1",
+                api_key_env="DEMO_API_KEY",
+            ),
+            model_name="chat-model",
+            model=ModelConfig(provider="deepseek", model_id="changed"),
+            make_default=False,
+        )
+        from nemo.config import editor as editor_module
+
+        real_write = editor_module._atomic_write
+        calls = 0
+
+        def fail_second(path, content, mode):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                raise OSError("simulated secret write failure")
+            return real_write(path, content, mode)
+
+        with patch("nemo.config.editor._atomic_write", side_effect=fail_second):
+            with self.assertRaises(OSError):
+                editor.save(candidate, {"DEMO_API_KEY": ("replace", "new")})
+        self.assertEqual(config_path.read_text(), old_config)
+        self.assertEqual(env_path.read_text(), old_env)

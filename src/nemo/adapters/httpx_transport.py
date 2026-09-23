@@ -10,12 +10,19 @@ import httpx
 
 from nemo.core.contracts.errors import TransportError
 from nemo.core.contracts.model_transport import HttpResponse
+from nemo.core.contracts.secrets import SecretValue
 
 
 class HttpxTransport:
-    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        *,
+        proxy: SecretValue | None = None,
+    ) -> None:
         self._client = client
         self._owns_client = client is None
+        self._proxy = proxy
 
     async def post(
         self,
@@ -50,5 +57,7 @@ class HttpxTransport:
 
     def _ensure_client(self) -> httpx.AsyncClient:
         if self._client is None:
-            self._client = httpx.AsyncClient()
+            self._client = httpx.AsyncClient(
+                proxy=self._proxy.reveal() if self._proxy is not None else None
+            )
         return self._client

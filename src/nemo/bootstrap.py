@@ -101,7 +101,10 @@ def build_model_client(
     return ModelClient(
         resolved=resolved,
         adapter=build_adapter(resolved.protocol),
-        transport=transport or HttpxTransport(),
+        transport=transport
+        or HttpxTransport(
+            proxy=loader.load(resolved.proxy_env) if resolved.proxy_env else None
+        ),
         secret=loader.load(resolved.api_key_env),
     )
 

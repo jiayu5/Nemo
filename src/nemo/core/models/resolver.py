@@ -46,6 +46,7 @@ class ModelResolver:
             protocol=provider.protocol,
             base_url=provider.base_url,
             api_key_env=provider.api_key_env,
+            proxy_env=provider.proxy_env,
             capabilities=model.capabilities,
             parameters=parameters,
             headers=dict(provider.headers),

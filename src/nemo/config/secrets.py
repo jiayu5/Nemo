@@ -1,5 +1,6 @@
 """Secret loading from the process environment, falling back to ``~/.nemo/.env``."""
 
+import json
 import os
 import re
 from collections.abc import Mapping
@@ -11,9 +12,6 @@ from nemo.core.contracts.secrets import SecretValue
 DEFAULT_SECRET_PATH = Path.home() / ".nemo" / ".env"
 
 _ENTRY = re.compile(r"^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$")
-_QUOTES = ("'", '"')
-
-
 class SecretLoader:
     """Resolves secret *names* to :class:`SecretValue` instances.
 
@@ -70,7 +68,12 @@ class SecretLoader:
             if match is None:
                 continue
             key, raw = match.group(1), match.group(2)
-            if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in _QUOTES:
+            if len(raw) >= 2 and raw[0] == raw[-1] == '"':
+                try:
+                    raw = json.loads(raw)
+                except json.JSONDecodeError:
+                    raw = raw[1:-1]
+            elif len(raw) >= 2 and raw[0] == raw[-1] == "'":
                 raw = raw[1:-1]
             entries[key] = raw
         return entries

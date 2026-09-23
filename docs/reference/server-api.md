@@ -1,12 +1,12 @@
 # Server API 参考
 
-Nemo Server 是 CLI 和 React UI 共用的本地应用后端。默认地址为 `http://127.0.0.1:8765`，默认数据库为 `~/.nemo/nemo.db`。
+Nemo Server 是 CLI 和 React UI 共用的本地应用后端。默认地址为 `http://127.0.0.1:18765`，默认数据库为 `~/.nemo/nemo.db`。
 
 ```bash
 conda run -n nemo python -m nemo.server
 ```
 
-可选参数：`--host` 只接受 loopback 地址，`--port` 修改端口，`--database` 修改 SQLite 路径。
+可选参数：`--host` 只接受 loopback 地址，`--port` 修改端口，`--database` 修改 SQLite 路径。`NEMO_SERVER_PORT` 同时决定 Server、CLI 和 Vite 开发代理的默认端口；改变它后需要重新启动各进程。若端口已有 Nemo Server，重复启动会直接提示已有实例；若是其他进程占用，会提示选择其他端口。
 
 ## Prompt 如何传递
 
@@ -32,7 +32,24 @@ Content-Type: application/json
 | `GET` | `/providers` | — | 脱敏 Provider 元数据和密钥配置状态 |
 | `POST` | `/providers/{provider_id}/test` | `{"model": string|null}` | 发起最小真实请求并返回模型身份和延迟 |
 
+`/models` 是完整选择目录，因此会同时返回 Profile、Alias 和 Model。React 输入器只展示 `kind = "model"` 的条目；Profile/Alias 仍可通过 API 与 CLI 使用，并可由 UI 解析为对应的实际 Model。
+
 连接测试会访问外部 Provider，可能产生费用。它不返回模型正文、密钥、请求 header 或完整 URL 凭据。
+
+### Provider Settings
+
+| 方法 | 路径 | 请求 | 结果 |
+|---|---|---|---|
+| `GET` | `/settings/providers` | — | 安全的 Provider/Model、默认项及 API Key/Proxy 来源状态 |
+| `POST` | `/settings/providers/{provider_id}/validate` | Provider/Model 草稿与密钥动作 | 只在内存校验，返回将写入的文件类型 |
+| `PUT` | `/settings/providers/{provider_id}` | 与校验相同 | 原子保存并返回安全状态 |
+| `DELETE` | `/settings/providers/{provider_id}` | — | 删除 Provider、所属模型及相关 Alias/Profile，返回新的默认模型 |
+
+草稿一次新增或更新一个 Provider 和一个 Model。API Key 与 Proxy 分别使用 `keep`、`replace`、`delete`；只有 `replace` 接受新值。响应、验证错误和 OpenAPI 输出均不包含提交的值。进程环境来源是只读覆盖层，不能通过接口替换或删除。
+
+保存会保留 UI 不编辑的 Alias、Profile、Provider headers 和 Model parameters。保存成功后目录查询、连接测试和新 Run 读取新配置；活动 Run 不热切换。保存本身不发起外部请求。
+
+删除 Provider 是显式危险操作。Server 会级联删除其模型以及指向这些模型的 Alias/Profile；当前默认项受影响时改用第一个剩余模型。为保证配置始终可用，最后一个已配置模型不能删除。删除不会清理 `.env` 中的值，避免误删共用凭据。
 
 ### Session
 
@@ -88,6 +105,7 @@ Content-Type: application/json
 - Run 保存实际解析出的 selection、model、protocol 和 provider，避免配置后来变化后失去历史身份。
 - Server 启动时把上次进程遗留的活动 Run 标记为 `interrupted`，不自动重放工具。
 - 密钥不进入 SQLite、API 响应或 Trace。
+- Provider Settings 通过临时文件、`fsync` 与 `os.replace` 写入；`.env` 权限固定为 `0600`。
 
 ## 客户端命令映射
 

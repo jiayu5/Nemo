@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import App from "./App";
 
@@ -16,6 +16,26 @@ const responses: Record<string, unknown> = {
       capabilities: ["tool_calling"],
       is_default: true,
     },
+    {
+      selection: "fast",
+      kind: "alias",
+      model_name: "demo-model",
+      model_id: "demo-v1",
+      provider_id: "demo",
+      protocol: "openai_compatible",
+      capabilities: ["tool_calling"],
+      is_default: false,
+    },
+    {
+      selection: "demo-model",
+      kind: "model",
+      model_name: "demo-model",
+      model_id: "demo-v1",
+      provider_id: "demo",
+      protocol: "openai_compatible",
+      capabilities: ["tool_calling"],
+      is_default: false,
+    },
   ],
   "/api/providers": [
     {
@@ -24,10 +44,96 @@ const responses: Record<string, unknown> = {
       base_url: "https://example.test/v1",
       api_key_env: "DEMO_API_KEY",
       secret_configured: true,
+      secret_source: "file",
+      proxy_env: null,
+      proxy_configured: false,
+      proxy_source: null,
       timeout_seconds: 60,
       models: ["demo-model"],
     },
   ],
+  "/api/settings/providers": {
+    config_exists: true,
+    default: "chat",
+    providers: [
+      {
+        provider_id: "demo",
+        protocol: "openai_compatible",
+        base_url: "https://example.test/v1",
+        api_key_env: "DEMO_API_KEY",
+        api_key_source: "file",
+        proxy_env: null,
+        proxy_source: null,
+        timeout_seconds: 60,
+        models: [
+          {
+            model_name: "demo-model",
+            model_id: "demo-v1",
+            capabilities: ["tool_calling"],
+            is_default: true,
+          },
+          {
+            model_name: "demo-reasoner",
+            model_id: "demo-reasoner-v1",
+            capabilities: [],
+            is_default: false,
+          },
+        ],
+      },
+    ],
+  },
+  "/api/settings/providers/demo/validate": {
+    status: "valid",
+    provider: {
+      provider_id: "demo",
+      protocol: "openai_compatible",
+      base_url: "https://example.test/v1",
+      api_key_env: "DEMO_API_KEY",
+      api_key_source: "file",
+      proxy_env: null,
+      proxy_source: null,
+      timeout_seconds: 60,
+      models: [],
+    },
+    writes: ["config"],
+  },
+  "/api/settings/providers/new-provider": {
+    status: "saved",
+    provider: {
+      provider_id: "new-provider",
+      protocol: "openai_compatible",
+      base_url: "https://new.example.test/v1",
+      api_key_env: "NEW_PROVIDER_API_KEY",
+      api_key_source: "file",
+      proxy_env: null,
+      proxy_source: null,
+      timeout_seconds: 60,
+      models: [
+        {
+          model_name: "new-chat",
+          model_id: "new-chat-v1",
+          capabilities: ["tool_calling"],
+          is_default: true,
+        },
+      ],
+    },
+    writes: ["config", "secrets"],
+  },
+  "/api/settings/providers/demo": {
+    status: "saved",
+    provider: {
+      provider_id: "demo",
+      protocol: "openai_compatible",
+      base_url: "https://example.test/v1",
+      api_key_env: "DEMO_API_KEY",
+      api_key_source: "file",
+      proxy_env: null,
+      proxy_source: null,
+      timeout_seconds: 60,
+      models: [],
+    },
+    writes: ["config"],
+  },
 };
 let runStartResponse: unknown = null;
 
@@ -46,7 +152,9 @@ describe("App", () => {
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
         const body =
-          init?.method === "POST" && path.endsWith("/runs") && runStartResponse
+          init?.method === "DELETE" && path === "/api/settings/providers/demo"
+            ? { status: "deleted", provider_id: "demo", removed_models: ["demo-model"], default: "backup" }
+            : init?.method === "POST" && path.endsWith("/runs") && runStartResponse
             ? runStartResponse
             : responses[path];
         return new Response(JSON.stringify(body), {
@@ -58,6 +166,7 @@ describe("App", () => {
   });
 
   afterEach(() => {
+    cleanup();
     responses["/api/sessions"] = [];
     delete responses["/api/sessions/session-1/messages"];
     delete responses["/api/sessions/session-1/runs"];
@@ -69,12 +178,129 @@ describe("App", () => {
     render(<App />);
     await waitFor(() => expect(screen.getByText("Server online")).toBeInTheDocument());
     expect(screen.getByText("Create a session to begin.")).toBeInTheDocument();
-    expect(screen.getByText("demo")).toBeInTheDocument();
+    expect(screen.getAllByRole("button", { name: "Connections" }).length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "New session" })).toBeInTheDocument();
     expect(screen.getByRole("combobox", { name: "Model" }).closest(".composer-toolbar"))
       .not.toBeNull();
     expect(screen.getByRole("combobox", { name: "Approval" }).closest(".composer-toolbar"))
       .not.toBeNull();
+    const modelOptions = screen.getByRole("combobox", { name: "Model" }).querySelectorAll("option");
+    expect(Array.from(modelOptions, (option) => option.textContent)).toEqual([
+      "demo-model · demo",
+    ]);
+  });
+
+  it("validates provider settings without exposing an existing secret", async () => {
+    render(<App />);
+    await screen.findByText("Server online");
+    fireEvent.click(screen.getAllByRole("button", { name: "Connections" })[0]);
+    expect(await screen.findByRole("heading", { name: "demo" })).toBeInTheDocument();
+    expect(screen.getAllByText("file").length).toBeGreaterThan(0);
+    expect(screen.queryByLabelText("New API key")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "Validate" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/settings/providers/demo/validate",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+    expect(await screen.findByText("Valid. Will update config.")).toBeInTheDocument();
+  });
+
+  it("keeps the add-provider form open and saves a new provider", async () => {
+    render(<App />);
+    await screen.findByText("Server online");
+    fireEvent.click(screen.getAllByRole("button", { name: "Connections" })[0]);
+    await screen.findByRole("heading", { name: "demo" });
+
+    fireEvent.click(screen.getByRole("button", { name: /Add provider/i }));
+    expect(await screen.findByRole("heading", { name: "Add a model provider" })).toBeInTheDocument();
+
+    const providerId = screen.getByPlaceholderText("my-provider");
+    expect(providerId).toBeEnabled();
+    fireEvent.change(providerId, { target: { value: "new-provider" } });
+    expect(screen.getByLabelText("API key variable")).toHaveValue("NEW_PROVIDER_API_KEY");
+    fireEvent.change(screen.getByPlaceholderText("https://api.example.com/v1"), {
+      target: { value: "https://new.example.test/v1" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("my-chat-model"), {
+      target: { value: "new-chat" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("model-v1"), {
+      target: { value: "new-chat-v1" },
+    });
+    fireEvent.change(screen.getByLabelText("New API key"), {
+      target: { value: "secret-value" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Confirm add" }));
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/settings/providers/new-provider",
+        expect.objectContaining({
+          method: "PUT",
+          body: expect.stringContaining('"model_name":"new-chat"'),
+        }),
+      ),
+    );
+  });
+
+  it("requires confirmation before deleting a provider", async () => {
+    render(<App />);
+    await screen.findByText("Server online");
+    fireEvent.click(screen.getAllByRole("button", { name: "Connections" })[0]);
+    await screen.findByRole("heading", { name: "demo" });
+
+    const deleteButton = screen.getByRole("button", { name: "Delete provider" });
+    const saveButton = screen.getByRole("button", { name: "Save changes" });
+    expect(deleteButton.parentElement).toBe(saveButton.parentElement);
+    fireEvent.click(deleteButton);
+    expect(screen.getByText("Delete demo?")).toBeInTheDocument();
+    expect(screen.getByText(/Saved secret values are retained/)).toBeInTheDocument();
+    expect(fetch).not.toHaveBeenCalledWith(
+      "/api/settings/providers/demo",
+      expect.objectContaining({ method: "DELETE" }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Delete permanently" }));
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/settings/providers/demo",
+        expect.objectContaining({ method: "DELETE" }),
+      ),
+    );
+  });
+
+  it("shows every provider model and adds another model", async () => {
+    render(<App />);
+    await screen.findByText("Server online");
+    fireEvent.click(screen.getAllByRole("button", { name: "Connections" })[0]);
+    await screen.findByRole("heading", { name: "demo" });
+    expect(screen.getByText("demo-model")).toBeInTheDocument();
+    expect(screen.getByText("demo-reasoner")).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ Add model" }));
+    fireEvent.change(screen.getByPlaceholderText("my-chat-model"), {
+      target: { value: "demo-pro" },
+    });
+    fireEvent.change(screen.getByPlaceholderText("model-v1"), {
+      target: { value: "demo-pro-v1" },
+    });
+    const addModel = document.querySelector<HTMLButtonElement>(".settings-actions .primary");
+    expect(addModel).not.toBeNull();
+    expect(addModel).toHaveTextContent("Add model");
+    fireEvent.click(addModel!);
+
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/settings/providers/demo",
+        expect.objectContaining({
+          method: "PUT",
+          body: expect.stringContaining('"model_name":"demo-pro"'),
+        }),
+      ),
+    );
   });
 
   it("sends with Enter and preserves Shift+Enter for a new line", async () => {

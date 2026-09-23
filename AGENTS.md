@@ -4,14 +4,14 @@
 
 Nemo 是个人 Agent OS 与 Agent 技术实验平台：基础设施使用成熟库，Agent Runtime 与核心智能机制自行实现。
 
-当前处于 Phase 1 的 M5：M1–M4、M5a（UI API）和 M5b（React UI）已完成，M5c（Provider Settings）尚未开始。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
+Phase 1 的 M1–M5 已完成，下一阶段是 M6 macOS App。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
 
 ## 目录职责
 
 - `src/nemo/core/`：领域契约、Runtime、Session、Context、模型与工具边界；不得依赖 FastAPI、SQLite、CLI 或 UI。
 - `src/nemo/adapters/`：HTTP、协议、Filesystem、Shell 与 Web 等基础设施适配器；`adapters/persistence/` 保存 SQLite schema、事件投影与 Repository。
-- `src/nemo/config/`：`config.toml` 与密钥读取；具体适配器只由 `src/nemo/bootstrap.py` 装配。
-- `src/nemo/server/`：FastAPI HTTP/SSE、应用外观，以及 Session、Run、Catalog、Trace 用例；只编排 Core，不复制 Agent Loop。
+- `src/nemo/config/`：`config.toml`、密钥读取与原子配置编辑；具体适配器只由 `src/nemo/bootstrap.py` 装配。
+- `src/nemo/server/`：FastAPI HTTP/SSE、应用外观，以及 Session、Run、Catalog、Trace、Settings 用例；只编排 Core，不复制 Agent Loop。
 - `src/nemo/cli/`：`main.py` 只做参数与模式分派，`remote.py` 是默认 Server 客户端，`direct.py` 是直连恢复模式；其余模块负责审批、事件渲染、HTTP 客户端与 transcript。
 - `src/nemo/prompts/`：具名、可独立测试的系统提示条款与项目说明加载。
 - `src/nemo/testing/`：无网络 Fake Model/Tool；测试不得在各文件重复造替身。

@@ -28,10 +28,16 @@ def load_config(path: Path | str | None = None) -> AppConfig:
         raw = tomllib.loads(config_path.read_text(encoding="utf-8"))
     except tomllib.TOMLDecodeError as exc:
         raise ConfigError(f"Invalid TOML in {config_path}: {exc}") from None
+    return validate_config(raw, source=str(config_path))
+
+
+def validate_config(raw: object, *, source: str = "configuration") -> AppConfig:
+    """Validate parsed configuration data and all cross references."""
+
     try:
         config = AppConfig.model_validate(raw)
     except ValidationError as exc:
-        raise ConfigError(f"Invalid config in {config_path}: {_first_issue(exc)}") from None
+        raise ConfigError(f"Invalid config in {source}: {_first_issue(exc)}") from None
     _check_references(config)
     return config
 
@@ -82,4 +88,4 @@ def _is_selectable(config: AppConfig, name: str) -> bool:
     return name in config.profiles or name in config.aliases or name in config.models
 
 
-__all__ = ["DEFAULT_CONFIG_PATH", "load_config"]
+__all__ = ["DEFAULT_CONFIG_PATH", "load_config", "validate_config"]

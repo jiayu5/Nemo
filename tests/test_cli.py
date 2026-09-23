@@ -243,7 +243,7 @@ class CliTests(unittest.TestCase):
 
         output = "\n".join(written)
         self.assertEqual(code, 0)
-        self.assertIn("server   : http://127.0.0.1:8765", output)
+        self.assertIn("server   : http://127.0.0.1:18765", output)
         self.assertIn("from server", output)
         self.assertEqual(self.transcripts(), [])
 

@@ -9,7 +9,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
-from fastapi.responses import StreamingResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse, StreamingResponse
 
 from nemo.core.contracts.errors import ConfigError, NemoError
 from nemo.core.contracts.types import Message
@@ -29,6 +30,10 @@ from nemo.server.schemas import (
     CreateSessionRequest,
     ModelOptionResponse,
     ProviderResponse,
+    ProviderDeleteResponse,
+    ProviderSettingsRequest,
+    ProviderSettingsResponse,
+    ProviderSettingsResult,
     ProviderTestRequest,
     ProviderTestResponse,
     RunResponse,
@@ -67,6 +72,21 @@ def create_app(
                 await agent_service.shutdown()
 
     app = FastAPI(title="Nemo Server", version="0.1.0", lifespan=lifespan)
+
+    @app.exception_handler(RequestValidationError)
+    async def safe_validation_error(
+        request: Request, exc: RequestValidationError
+    ) -> JSONResponse:
+        del request
+        details = [
+            {
+                "location": ".".join(str(part) for part in error["loc"]),
+                "message": error["msg"],
+                "type": error["type"],
+            }
+            for error in exc.errors()
+        ]
+        return JSONResponse(status_code=422, content={"detail": details})
 
     @app.get("/health")
     async def health() -> dict[str, str]:
@@ -162,6 +182,52 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except NemoError as exc:
             raise HTTPException(status_code=502, detail=exc.public_message) from None
+
+    @app.get("/settings/providers", response_model=ProviderSettingsResponse)
+    async def provider_settings() -> dict:
+        try:
+            return agent_service.provider_settings()
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+
+    @app.post(
+        "/settings/providers/{provider_id}/validate",
+        response_model=ProviderSettingsResult,
+    )
+    async def validate_provider_settings(
+        provider_id: str, body: ProviderSettingsRequest
+    ) -> dict:
+        try:
+            return agent_service.validate_provider_settings(provider_id, body)
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+
+    @app.put(
+        "/settings/providers/{provider_id}",
+        response_model=ProviderSettingsResult,
+    )
+    async def save_provider_settings(
+        provider_id: str, body: ProviderSettingsRequest
+    ) -> dict:
+        try:
+            return agent_service.save_provider_settings(provider_id, body)
+        except ConfigError as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+        except OSError:
+            raise HTTPException(status_code=500, detail="could not save configuration") from None
+
+    @app.delete(
+        "/settings/providers/{provider_id}",
+        response_model=ProviderDeleteResponse,
+    )
+    async def delete_provider_settings(provider_id: str) -> dict:
+        try:
+            return agent_service.delete_provider_settings(provider_id)
+        except ConfigError as exc:
+            status_code = 404 if exc.public_message == "provider not found" else 409
+            raise HTTPException(status_code=status_code, detail=exc.public_message) from None
+        except OSError:
+            raise HTTPException(status_code=500, detail="could not save configuration") from None
 
     @app.post(
         "/sessions/{session_id}/runs",

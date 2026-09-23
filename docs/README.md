@@ -24,7 +24,7 @@
 | M2 · 模型系统 | 进行中：`openai_compatible` 已完成 | 2026-09-17 | [M2](milestones/M2-model-system.md) |
 | M3 · 本地执行与 Web 工具 | 已完成 | 2026-09-17；M3b 追加于 2026-09-21 | [M3](milestones/M3-local-execution.md) |
 | M4 · Context、CLI 与 Server | 已完成 | 2026-09-17 至 2026-09-21 | [M4](milestones/M4-context-cli-server.md) |
-| M5 · React UI | 进行中：M5a、M5b 已完成；M5c 未开始 | 2026-09-21 | [M5](milestones/M5-react-ui.md) |
+| M5 · React UI | 已完成 | 2026-09-21 至 2026-09-22 | [M5](milestones/M5-react-ui.md) |
 | M6 · macOS App | 未开始 | — | 见 [Architecture](../NEMO_ARCHITECTURE.md#8-roadmap) |
 
 ## 现行参考
@@ -39,7 +39,8 @@
 | [context-assembly](design/context-assembly.md) | 已实现；T1 待定 | 稳定前缀、项目说明与每轮 Reminder |
 | [cli-and-approval](design/cli-and-approval.md) | 已实现 | Session、三档审批、终端交互与脱敏 |
 | [server-and-persistence](design/server-and-persistence.md) | 已实现 | Server、SQLite、SSE 与生命周期 |
-| [ui-and-api](design/ui-and-api.md) | M5a/M5b 已实现，M5c 待设计 | React UI、查询 API 与 Provider Settings 边界 |
+| [ui-and-api](design/ui-and-api.md) | 已实现 | React UI、查询 API 与 Provider Settings 边界 |
+| [provider-settings](design/provider-settings.md) | 已实现 | Provider/Model 写入、密钥、Proxy 与生效语义 |
 | [web-tools](design/web-tools.md) | 已实现；搜索后端待升级 | `web_search`、`fetch_url` 与网络边界 |
 
 ## Milestone 写法

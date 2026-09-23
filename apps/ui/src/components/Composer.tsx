@@ -15,6 +15,18 @@ interface Props {
 export function Composer({
   selected, models, activeRun, prompt, onPromptChange, onSubmit, onModeChange, onModelChange,
 }: Props) {
+  const actualModels = models.filter((model) => model.kind === "model");
+  const selectedOption = models.find((model) => model.selection === selected?.model);
+  const selectedModel = actualModels.find(
+    (model) => model.model_name === selectedOption?.model_name,
+  )?.selection;
+  const defaultModel = actualModels.find((model) => model.is_default)?.selection
+    ?? actualModels.find(
+      (model) => model.model_name === models.find((item) => item.is_default)?.model_name,
+    )?.selection
+    ?? actualModels[0]?.selection
+    ?? "";
+
   function handleKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
       event.preventDefault();
@@ -51,13 +63,13 @@ export function Composer({
           <label className="composer-control model-control">
             <select
               aria-label="Model"
-              value={selected?.model ?? models.find((item) => item.is_default)?.selection ?? ""}
-              disabled={!selected || Boolean(activeRun)}
+              value={selectedModel ?? defaultModel}
+              disabled={!selected || Boolean(activeRun) || actualModels.length === 0}
               onChange={(event) => onModelChange(event.target.value)}
             >
-              {models.map((model) => (
+              {actualModels.map((model) => (
                 <option key={model.selection} value={model.selection}>
-                  {model.selection} · {model.provider_id}
+                  {model.model_name} · {model.provider_id}
                 </option>
               ))}
             </select>

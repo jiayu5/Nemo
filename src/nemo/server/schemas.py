@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from nemo.core.contracts.types import Event
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
@@ -102,6 +102,10 @@ class ProviderResponse(ApiModel):
     base_url: str
     api_key_env: str
     secret_configured: bool
+    secret_source: Literal["environment", "file"] | None = None
+    proxy_env: str | None = None
+    proxy_configured: bool = False
+    proxy_source: Literal["environment", "file"] | None = None
     timeout_seconds: float
     models: list[str]
 
@@ -118,6 +122,71 @@ class ProviderTestResponse(ApiModel):
     model_id: str
     protocol: str
     latency_ms: float
+
+
+class SecretMutation(ApiModel):
+    action: Literal["keep", "replace", "delete"] = "keep"
+    value: str | None = Field(default=None, max_length=8192)
+
+    @model_validator(mode="after")
+    def value_matches_action(self):
+        if self.action == "replace" and (self.value is None or not self.value.strip()):
+            raise ValueError("replacement value may not be blank")
+        if self.action != "replace" and self.value is not None:
+            raise ValueError("value is only accepted for replace")
+        return self
+
+
+class ProviderSettingsRequest(ApiModel):
+    protocol: Literal["openai_compatible", "openai_responses", "anthropic_messages"]
+    base_url: str = Field(min_length=1)
+    api_key_env: str = Field(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    proxy_env: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    timeout_seconds: float = Field(default=60.0, gt=0, le=600)
+    model_name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    model_id: str = Field(min_length=1)
+    tool_calling: bool = True
+    make_default: bool = False
+    api_key: SecretMutation = Field(default_factory=SecretMutation)
+    proxy: SecretMutation = Field(default_factory=SecretMutation)
+
+
+class SettingsModelResponse(ApiModel):
+    model_name: str
+    model_id: str
+    capabilities: list[str]
+    is_default: bool
+
+
+class SettingsProviderResponse(ApiModel):
+    provider_id: str
+    protocol: str
+    base_url: str
+    api_key_env: str
+    api_key_source: Literal["environment", "file"] | None
+    proxy_env: str | None
+    proxy_source: Literal["environment", "file"] | None
+    timeout_seconds: float
+    models: list[SettingsModelResponse]
+
+
+class ProviderSettingsResponse(ApiModel):
+    config_exists: bool
+    default: str | None
+    providers: list[SettingsProviderResponse]
+
+
+class ProviderSettingsResult(ApiModel):
+    status: Literal["valid", "saved"]
+    provider: SettingsProviderResponse
+    writes: list[Literal["config", "secrets"]]
+
+
+class ProviderDeleteResponse(ApiModel):
+    status: Literal["deleted"]
+    provider_id: str
+    removed_models: list[str]
+    default: str
 
 
 class TraceStepResponse(ApiModel):

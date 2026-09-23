@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 from nemo.config.loader import load_config
+from nemo.config.editor import ConfigEditor
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.types import Event, Message
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
@@ -11,6 +12,7 @@ from nemo.server.catalog import CatalogService
 from nemo.server.repository import Repository
 from nemo.server.runs import RunManager
 from nemo.server.sessions import SessionService
+from nemo.server.settings import SettingsService
 from nemo.server.trace import TraceService
 
 
@@ -24,6 +26,7 @@ class NemoApplication:
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
         secret_loader_factory: Callable[[], Any] = SecretLoader,
+        config_editor: ConfigEditor | None = None,
     ) -> None:
         self.repository = repository
         self.sessions = SessionService(repository, config_loader=config_loader)
@@ -40,6 +43,7 @@ class NemoApplication:
             config_loader=config_loader,
         )
         self.traces = TraceService(repository)
+        self.settings = SettingsService(config_editor or ConfigEditor())
 
     async def startup(self) -> list[str]:
         return await self.runs.startup()
@@ -90,6 +94,18 @@ class NemoApplication:
         self, provider_id: str, selection: str | None = None
     ) -> dict[str, Any]:
         return await self.catalog.test_provider(provider_id, selection)
+
+    def provider_settings(self) -> dict[str, Any]:
+        return self.settings.list()
+
+    def validate_provider_settings(self, provider_id: str, request) -> dict[str, Any]:
+        return self.settings.validate(provider_id, request)
+
+    def save_provider_settings(self, provider_id: str, request) -> dict[str, Any]:
+        return self.settings.save(provider_id, request)
+
+    def delete_provider_settings(self, provider_id: str) -> dict[str, Any]:
+        return self.settings.delete(provider_id)
 
     def start_run(
         self, session_id: str, *, prompt: str, max_steps: int

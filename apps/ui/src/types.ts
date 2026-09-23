@@ -72,8 +72,66 @@ export interface Provider {
   base_url: string;
   api_key_env: string;
   secret_configured: boolean;
+  secret_source: "environment" | "file" | null;
+  proxy_env: string | null;
+  proxy_configured: boolean;
+  proxy_source: "environment" | "file" | null;
   timeout_seconds: number;
   models: string[];
+}
+
+export interface SettingsModel {
+  model_name: string;
+  model_id: string;
+  capabilities: string[];
+  is_default: boolean;
+}
+
+export interface SettingsProvider {
+  provider_id: string;
+  protocol: string;
+  base_url: string;
+  api_key_env: string;
+  api_key_source: "environment" | "file" | null;
+  proxy_env: string | null;
+  proxy_source: "environment" | "file" | null;
+  timeout_seconds: number;
+  models: SettingsModel[];
+}
+
+export interface ProviderSettings {
+  config_exists: boolean;
+  default: string | null;
+  providers: SettingsProvider[];
+}
+
+export type SecretAction = "keep" | "replace" | "delete";
+
+export interface ProviderSettingsDraft {
+  protocol: "openai_compatible" | "openai_responses" | "anthropic_messages";
+  base_url: string;
+  api_key_env: string;
+  proxy_env: string | null;
+  timeout_seconds: number;
+  model_name: string;
+  model_id: string;
+  tool_calling: boolean;
+  make_default: boolean;
+  api_key: { action: SecretAction; value?: string };
+  proxy: { action: SecretAction; value?: string };
+}
+
+export interface ProviderSettingsResult {
+  status: "valid" | "saved";
+  provider: SettingsProvider;
+  writes: Array<"config" | "secrets">;
+}
+
+export interface ProviderDeleteResult {
+  status: "deleted";
+  provider_id: string;
+  removed_models: string[];
+  default: string;
 }
 
 export interface ApprovalRequest {

@@ -8,6 +8,7 @@ import type {
   Message,
   ModelOption,
   Provider,
+  ProviderSettings,
   Run,
   RunEvent,
   Session,
@@ -28,6 +29,7 @@ export function useNemoWorkspace() {
   const [trace, setTrace] = useState<Trace | null>(null);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [providers, setProviders] = useState<Provider[]>([]);
+  const [providerSettings, setProviderSettings] = useState<ProviderSettings | null>(null);
   const [activeRun, setActiveRun] = useState<Run | null>(null);
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const [workspace, setWorkspace] = useState(".");
@@ -61,15 +63,34 @@ export function useNemoWorkspace() {
     return items;
   }, []);
 
+  const refreshConfiguration = useCallback(async () => {
+    const [settings, modelItems, providerItems] = await Promise.all([
+      api.providerSettings(),
+      api.models().catch(() => [] as ModelOption[]),
+      api.providers().catch(() => [] as Provider[]),
+    ]);
+    setProviderSettings(settings);
+    setModels(modelItems);
+    setProviders(providerItems);
+    return settings;
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    Promise.all([api.health(), api.sessions(), api.models(), api.providers()])
-      .then(async ([, sessionItems, modelItems, providerItems]) => {
+    Promise.all([
+      api.health(),
+      api.sessions(),
+      api.providerSettings(),
+      api.models().catch(() => [] as ModelOption[]),
+      api.providers().catch(() => [] as Provider[]),
+    ])
+      .then(async ([, sessionItems, settings, modelItems, providerItems]) => {
         if (cancelled) return;
         setServerOnline(true);
         setSessions(sessionItems);
         setModels(modelItems);
         setProviders(providerItems);
+        setProviderSettings(settings);
         if (sessionItems[0]) await loadSession(sessionItems[0]);
       })
       .catch((reason: unknown) => {
@@ -84,7 +105,10 @@ export function useNemoWorkspace() {
   async function createSession(event: FormEvent) {
     event.preventDefault();
     try {
-      const model = models.find((item) => item.is_default)?.selection ?? null;
+      const defaultOption = models.find((item) => item.is_default);
+      const model = defaultOption?.model_name
+        ?? models.find((item) => item.kind === "model")?.selection
+        ?? null;
       const session = await api.createSession(workspace, model, "ask");
       await refreshSessions();
       await loadSession(session);
@@ -208,8 +232,9 @@ export function useNemoWorkspace() {
 
   return {
     serverOnline, sessions, selected, messages, runs, events, trace, models, providers,
+    providerSettings,
     activeRun, approval, workspace, prompt, error, setWorkspace, setPrompt,
     createSession, selectSession, submitPrompt, answerApproval, updateMode, updateModel,
-    selectRun, cancelRun,
+    selectRun, cancelRun, refreshConfiguration,
   };
 }

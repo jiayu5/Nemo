@@ -3,6 +3,10 @@ import type {
   Message,
   ModelOption,
   Provider,
+  ProviderDeleteResult,
+  ProviderSettings,
+  ProviderSettingsDraft,
+  ProviderSettingsResult,
   Run,
   RunEvent,
   Session,
@@ -22,8 +26,19 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     let detail = `HTTP ${response.status}`;
     try {
-      const body = (await response.json()) as { detail?: string };
-      detail = body.detail || detail;
+      const body = (await response.json()) as { detail?: unknown };
+      if (typeof body.detail === "string") {
+        detail = body.detail;
+      } else if (Array.isArray(body.detail)) {
+        const messages = body.detail
+          .map((item) =>
+            typeof item === "object" && item !== null && "message" in item
+              ? String(item.message)
+              : "",
+          )
+          .filter(Boolean);
+        if (messages.length) detail = messages.join("; ");
+      }
     } catch {
       // Keep the status-only fallback; response bodies are not always JSON.
     }
@@ -45,6 +60,26 @@ export const api = {
   runs: (sessionId: string) => request<Run[]>(`/sessions/${sessionId}/runs`),
   models: () => request<ModelOption[]>("/models"),
   providers: () => request<Provider[]>("/providers"),
+  providerSettings: () => request<ProviderSettings>("/settings/providers"),
+  validateProviderSettings: (providerId: string, draft: ProviderSettingsDraft) =>
+    request<ProviderSettingsResult>(
+      `/settings/providers/${encodeURIComponent(providerId)}/validate`,
+      { method: "POST", body: JSON.stringify(draft) },
+    ),
+  saveProviderSettings: (providerId: string, draft: ProviderSettingsDraft) =>
+    request<ProviderSettingsResult>(`/settings/providers/${encodeURIComponent(providerId)}`, {
+      method: "PUT",
+      body: JSON.stringify(draft),
+    }),
+  deleteProviderSettings: (providerId: string) =>
+    request<ProviderDeleteResult>(`/settings/providers/${encodeURIComponent(providerId)}`, {
+      method: "DELETE",
+    }),
+  testProvider: (providerId: string, model: string | null) =>
+    request<{ status: "ok"; latency_ms: number }>(
+      `/providers/${encodeURIComponent(providerId)}/test`,
+      { method: "POST", body: JSON.stringify({ model }) },
+    ),
   updateMode: (sessionId: string, approvalMode: ApprovalMode) =>
     request<Session>(`/sessions/${sessionId}`, {
       method: "PATCH",

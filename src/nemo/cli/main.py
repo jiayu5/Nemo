@@ -14,6 +14,7 @@ from nemo.cli.remote import serve_remote
 from nemo.cli.server_client import ServerClientError
 from nemo.cli.streams import Streams
 from nemo.cli.transcript import list_sessions
+from nemo.config.server_endpoint import server_url
 from nemo.core.contracts.errors import NemoError
 from nemo.core.tools.approval import ApprovalMode
 
@@ -34,8 +35,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--sessions", action="store_true", help="list known sessions and exit")
     parser.add_argument(
         "--server",
-        default="http://127.0.0.1:8765",
-        help="Nemo Server base URL (default: http://127.0.0.1:8765)",
+        default=server_url(),
+        help="Nemo Server base URL (default: http://127.0.0.1:18765; NEMO_SERVER_PORT overrides it)",
     )
     parser.add_argument(
         "--direct",

@@ -48,21 +48,32 @@ class CatalogService:
         config = self._config_loader()
         secret_loader = self._secret_loader_factory()
         return [
-            {
-                "provider_id": provider_id,
-                "protocol": provider.protocol,
-                "base_url": self._public_base_url(provider.base_url),
-                "api_key_env": provider.api_key_env,
-                "secret_configured": secret_loader.source(provider.api_key_env) is not None,
-                "timeout_seconds": provider.timeout_seconds,
-                "models": sorted(
-                    name
-                    for name, model in config.models.items()
-                    if model.provider == provider_id
-                ),
-            }
+            self._provider_view(provider_id, provider, config, secret_loader)
             for provider_id, provider in config.providers.items()
         ]
+
+    def _provider_view(self, provider_id, provider, config, secret_loader):
+        secret_source = secret_loader.source(provider.api_key_env)
+        proxy_source = (
+            secret_loader.source(provider.proxy_env) if provider.proxy_env else None
+        )
+        return {
+            "provider_id": provider_id,
+            "protocol": provider.protocol,
+            "base_url": self._public_base_url(provider.base_url),
+            "api_key_env": provider.api_key_env,
+            "secret_configured": secret_source is not None,
+            "secret_source": secret_source,
+            "proxy_env": provider.proxy_env,
+            "proxy_configured": proxy_source is not None,
+            "proxy_source": proxy_source,
+            "timeout_seconds": provider.timeout_seconds,
+            "models": sorted(
+                name
+                for name, model in config.models.items()
+                if model.provider == provider_id
+            ),
+        }
 
     async def test_provider(
         self, provider_id: str, selection: str | None = None
