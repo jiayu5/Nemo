@@ -1,4 +1,5 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
+import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ApprovalMode,
   Message,
@@ -52,6 +53,16 @@ export async function defaultWorkspace(): Promise<string> {
   }
 }
 
+export async function chooseWorkspace(current: string): Promise<string | null> {
+  if (!isTauri()) return null;
+  return open({
+    directory: true,
+    multiple: false,
+    title: "Choose a workspace",
+    ...(current.startsWith("/") ? { defaultPath: current } : {}),
+  });
+}
+
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const target = await endpoint();
   const response = await fetch(`${target.base}${path}`, {
@@ -83,6 +94,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new Error(detail);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -94,6 +106,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspace, model, approval_mode: approvalMode }),
     }),
+  deleteSession: (sessionId: string) =>
+    request<void>(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
   messages: (sessionId: string) =>
     request<Message[]>(`/sessions/${sessionId}/messages`),
   runs: (sessionId: string) => request<Run[]>(`/sessions/${sessionId}/runs`),

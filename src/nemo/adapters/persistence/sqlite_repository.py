@@ -6,20 +6,31 @@ import json
 import os
 import sqlite3
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from nemo.core.contracts.types import Event, Message, RunResult
 from nemo.core.contracts.events import EventType
 from nemo.redaction import redact
 from nemo.adapters.persistence.event_projection import materialize_event
 from nemo.adapters.persistence.sqlite_schema import initialize_schema
-from nemo.server.errors import ActiveRunError
+from nemo.server.errors import ActiveRunError, SessionNotFoundError
 
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _pid_alive(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
 
 
 def _json(value: Any) -> str:
@@ -51,17 +62,50 @@ class SQLiteRepository:
         self.path = Path(path).expanduser().resolve()
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = threading.RLock()
-        self._connection = sqlite3.connect(self.path, check_same_thread=False)
+        self._connection = sqlite3.connect(self.path, check_same_thread=False, timeout=10)
         os.chmod(self.path, 0o600)
         self._connection.row_factory = sqlite3.Row
         self._connection.execute("PRAGMA foreign_keys = ON")
         self._connection.execute("PRAGMA journal_mode = WAL")
+        self._connection.execute("PRAGMA busy_timeout = 10000")
+        self.instance_id = str(uuid4())
+        self._stop_heartbeat = threading.Event()
+        self._closed = False
         with self._connection:
             initialize_schema(self._connection)
+            self._connection.execute(
+                "INSERT INTO server_instances(instance_id, pid, heartbeat_at) VALUES (?, ?, ?)",
+                (self.instance_id, os.getpid(), _now()),
+            )
+        self._heartbeat_thread = threading.Thread(
+            target=self._heartbeat, name="nemo-db-heartbeat", daemon=True
+        )
+        self._heartbeat_thread.start()
 
     def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        self._stop_heartbeat.set()
+        self._heartbeat_thread.join(timeout=3)
         with self._lock:
+            with self._connection:
+                self._connection.execute(
+                    "DELETE FROM server_instances WHERE instance_id = ?", (self.instance_id,)
+                )
             self._connection.close()
+
+    def _heartbeat(self) -> None:
+        while not self._stop_heartbeat.wait(2):
+            try:
+                with self._lock, self._connection:
+                    self._connection.execute(
+                        "UPDATE server_instances SET heartbeat_at = ? WHERE instance_id = ?",
+                        (_now(), self.instance_id),
+                    )
+            except sqlite3.Error:
+                # A transient busy database must not end the liveness thread.
+                continue
 
     def create_session(
         self,
@@ -107,6 +151,27 @@ class SQLiteRepository:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def delete_session(self, session_id: str) -> None:
+        """Delete a quiet session atomically; foreign keys remove its history."""
+        with self._lock, self._connection:
+            deleted = self._connection.execute(
+                """DELETE FROM sessions
+                   WHERE session_id = ? AND NOT EXISTS (
+                       SELECT 1 FROM runs
+                       WHERE runs.session_id = sessions.session_id
+                         AND runs.status IN ('queued', 'running')
+                   )""",
+                (session_id,),
+            )
+            if deleted.rowcount:
+                return
+            exists = self._connection.execute(
+                "SELECT 1 FROM sessions WHERE session_id = ?", (session_id,)
+            ).fetchone()
+            if exists:
+                raise ActiveRunError("the session has an active run")
+            raise SessionNotFoundError(session_id)
+
     def update_session(
         self, session_id: str, *, model: str | None = None, approval_mode: str | None = None
     ) -> dict[str, Any] | None:
@@ -145,9 +210,9 @@ class SQLiteRepository:
             with self._lock, self._connection:
                 self._connection.execute(
                     """INSERT INTO runs
-                       (run_id, session_id, status, prompt, max_steps, created_at)
-                       VALUES (?, ?, 'queued', ?, ?, ?)""",
-                    (run_id, session_id, redact(prompt), max_steps, now),
+                       (run_id, session_id, status, prompt, max_steps, created_at, owner_id)
+                       VALUES (?, ?, 'queued', ?, ?, ?, ?)""",
+                    (run_id, session_id, redact(prompt), max_steps, now, self.instance_id),
                 )
         except sqlite3.IntegrityError as exc:
             if "one_active_run_per_session" in str(exc) or "runs.session_id" in str(exc):
@@ -161,6 +226,21 @@ class SQLiteRepository:
                 "SELECT * FROM runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         return dict(row) if row is not None else None
+
+    def owns_run(self, run_id: str) -> bool:
+        row = self.get_run(run_id)
+        return row is not None and row["owner_id"] == self.instance_id
+
+    def request_cancel(self, run_id: str) -> None:
+        with self._lock, self._connection:
+            self._connection.execute(
+                "UPDATE runs SET cancel_requested = 1 WHERE run_id = ? AND status IN ('queued', 'running')",
+                (run_id,),
+            )
+
+    def cancel_requested(self, run_id: str) -> bool:
+        row = self.get_run(run_id)
+        return bool(row and row["cancel_requested"])
 
     def list_runs(self, session_id: str) -> list[dict[str, Any]]:
         with self._lock:
@@ -193,11 +273,11 @@ class SQLiteRepository:
     def set_run_running(self, run_id: str) -> None:
         with self._lock, self._connection:
             self._connection.execute(
-                "UPDATE runs SET status = 'running', started_at = ? WHERE run_id = ?",
-                (_now(), run_id),
+                "UPDATE runs SET status = 'running', started_at = ? WHERE run_id = ? AND owner_id = ? AND status = 'queued'",
+                (_now(), run_id, self.instance_id),
             )
 
-    def finish_run(self, result: RunResult) -> None:
+    def finish_run(self, result: RunResult, *, terminal_event: Event) -> None:
         run_id = result.state.run_id
         with self._lock, self._connection:
             row = self._connection.execute(
@@ -206,17 +286,20 @@ class SQLiteRepository:
             if row is None:
                 raise KeyError(run_id)
             session_id = row["session_id"]
-            self._connection.execute(
+            changed = self._connection.execute(
                 """UPDATE runs SET status = ?, output = ?, error = ?, finished_at = ?
-                   WHERE run_id = ?""",
+                   WHERE run_id = ? AND owner_id = ? AND status IN ('queued', 'running')""",
                 (
                     result.state.status.value,
                     redact(result.state.output) if result.state.output else None,
                     redact(result.state.error) if result.state.error else None,
                     _now(),
                     run_id,
+                    self.instance_id,
                 ),
-            )
+            ).rowcount
+            if not changed:
+                return
             existing = self._connection.execute(
                 "SELECT COUNT(*) AS count FROM messages WHERE session_id = ?", (session_id,)
             ).fetchone()["count"]
@@ -230,64 +313,63 @@ class SQLiteRepository:
                 "UPDATE sessions SET updated_at = ? WHERE session_id = ?",
                 (_now(), session_id),
             )
-
-    def fail_run(self, run_id: str, message: str) -> None:
-        with self._lock:
-            with self._connection:
-                self._connection.execute(
-                    """UPDATE runs SET status = 'failed', error = ?, finished_at = ?
-                       WHERE run_id = ?""",
-                    (redact(message), _now(), run_id),
-                )
-            # Keep the repository lock until the terminal event is visible so
-            # an SSE reader cannot observe a terminal status without its event.
-            self.append_event(
-                run_id=run_id,
-                step=0,
-                kind=EventType.RUN_FAILED,
-                payload={"error": message},
+            self._append_event_locked(
+                run_id=run_id, step=terminal_event.step, kind=terminal_event.type,
+                payload=terminal_event.payload, timestamp=terminal_event.timestamp.isoformat(),
             )
 
-    def interrupt_run(self, run_id: str) -> None:
-        with self._lock:
-            with self._connection:
-                changed = self._connection.execute(
-                    """UPDATE runs SET status = 'interrupted', finished_at = ?
-                       WHERE run_id = ? AND status IN ('queued', 'running')""",
-                    (_now(), run_id),
-                ).rowcount
+    def fail_run(self, run_id: str, message: str) -> None:
+        with self._lock, self._connection:
+            changed = self._connection.execute(
+                """UPDATE runs SET status = 'failed', error = ?, finished_at = ?
+                   WHERE run_id = ? AND owner_id = ? AND status IN ('queued', 'running')""",
+                (redact(message), _now(), run_id, self.instance_id),
+            ).rowcount
             if changed:
-                self.append_event(
-                    run_id=run_id,
-                    step=0,
-                    kind=EventType.RUN_INTERRUPTED,
-                    payload={},
+                self._append_event_locked(
+                    run_id=run_id, step=0, kind=EventType.RUN_FAILED,
+                    payload={"error": message},
+                )
+
+    def interrupt_run(self, run_id: str) -> None:
+        with self._lock, self._connection:
+            changed = self._connection.execute(
+                """UPDATE runs SET status = 'interrupted', finished_at = ?
+                   WHERE run_id = ? AND owner_id = ? AND status IN ('queued', 'running')""",
+                (_now(), run_id, self.instance_id),
+            ).rowcount
+            if changed:
+                self._append_event_locked(
+                    run_id=run_id, step=0, kind=EventType.RUN_INTERRUPTED, payload={},
                 )
 
     def append_event(
         self, *, run_id: str, step: int, kind: str, payload: dict[str, Any], timestamp: str | None = None
     ) -> Event:
+        with self._lock, self._connection:
+            return self._append_event_locked(
+                run_id=run_id, step=step, kind=kind, payload=payload, timestamp=timestamp,
+            )
+
+    def _append_event_locked(
+        self, *, run_id: str, step: int, kind: str,
+        payload: dict[str, Any], timestamp: str | None = None,
+    ) -> Event:
         safe_payload = json.loads(_json(payload))
         when = timestamp or _now()
-        with self._lock, self._connection:
-            seq = self._connection.execute(
-                "SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM events WHERE run_id = ?",
-                (run_id,),
-            ).fetchone()["seq"]
-            self._connection.execute(
-                """INSERT INTO events(run_id, seq, step, type, timestamp, payload_json)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (run_id, seq, step, kind, when, _json(safe_payload)),
-            )
-            materialize_event(
-                self._connection,
-                run_id=run_id,
-                seq=seq,
-                step=step,
-                kind=kind,
-                payload=safe_payload,
-                when=when,
-            )
+        seq = self._connection.execute(
+            "SELECT COALESCE(MAX(seq), 0) + 1 AS seq FROM events WHERE run_id = ?",
+            (run_id,),
+        ).fetchone()["seq"]
+        self._connection.execute(
+            """INSERT INTO events(run_id, seq, step, type, timestamp, payload_json)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (run_id, seq, step, kind, when, _json(safe_payload)),
+        )
+        materialize_event(
+            self._connection, run_id=run_id, seq=seq, step=step,
+            kind=kind, payload=safe_payload, when=when,
+        )
         return Event(
             run_id=run_id,
             seq=seq,
@@ -388,21 +470,32 @@ class SQLiteRepository:
 
     def recover_interrupted_runs(self) -> list[str]:
         with self._lock, self._connection:
-            rows = self._connection.execute(
-                "SELECT run_id FROM runs WHERE status IN ('queued', 'running')"
+            cutoff = datetime.now(timezone.utc) - timedelta(seconds=15)
+            instances = self._connection.execute(
+                "SELECT instance_id, pid, heartbeat_at FROM server_instances"
             ).fetchall()
-            ids = [row["run_id"] for row in rows]
+            for instance in instances:
+                if not _pid_alive(instance["pid"]) or datetime.fromisoformat(
+                    instance["heartbeat_at"]
+                ) < cutoff:
+                    self._connection.execute(
+                        "DELETE FROM server_instances WHERE instance_id = ?",
+                        (instance["instance_id"],),
+                    )
+            ids = [
+                row["run_id"] for row in self._connection.execute(
+                    """SELECT r.run_id FROM runs r
+                       LEFT JOIN server_instances i ON i.instance_id = r.owner_id
+                       WHERE r.status IN ('queued', 'running') AND i.instance_id IS NULL"""
+                )
+            ]
             for run_id in ids:
                 self._connection.execute(
                     """UPDATE runs SET status = 'interrupted', finished_at = ?
                        WHERE run_id = ?""",
                     (_now(), run_id),
                 )
-        for run_id in ids:
-            self.append_event(
-                run_id=run_id,
-                step=0,
-                kind=EventType.RUN_INTERRUPTED,
-                payload={},
-            )
+                self._append_event_locked(
+                    run_id=run_id, step=0, kind=EventType.RUN_INTERRUPTED, payload={},
+                )
         return ids

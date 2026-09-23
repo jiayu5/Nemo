@@ -5,14 +5,10 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from pathlib import Path
 
 import uvicorn
 
-from nemo.server.app import create_app
-
-
-DESKTOP_DATABASE_PATH = Path.home() / ".nemo" / "desktop.db"
+from nemo.server.app import DEFAULT_DATABASE_PATH, create_app
 
 
 async def serve() -> None:
@@ -21,7 +17,7 @@ async def serve() -> None:
         raise RuntimeError("NEMO_DESKTOP_TOKEN is required for the desktop sidecar")
 
     config = uvicorn.Config(
-        create_app(database_path=DESKTOP_DATABASE_PATH, desktop_token=token),
+        create_app(database_path=DEFAULT_DATABASE_PATH, desktop_token=token),
         host="127.0.0.1",
         port=0,
         access_log=False,

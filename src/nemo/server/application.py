@@ -64,6 +64,9 @@ class NemoApplication:
     def get_session(self, session_id: str) -> dict[str, Any]:
         return self.sessions.get(session_id)
 
+    def delete_session(self, session_id: str) -> None:
+        self.sessions.delete(session_id)
+
     def update_session(
         self,
         session_id: str,

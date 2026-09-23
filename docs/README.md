@@ -43,7 +43,7 @@
 | [ui-and-api](design/ui-and-api.md) | 已实现 | React UI、查询 API 与 Provider Settings 边界 |
 | [provider-settings](design/provider-settings.md) | 已实现 | Provider/Model 写入、密钥、Proxy 与生效语义 |
 | [web-tools](design/web-tools.md) | 已实现；搜索后端待升级 | `web_search`、`fetch_url` 与网络边界 |
-| [macos-app](design/macos-app.md) | 已实现 | Tauri 桌面壳、Python sidecar、桌面访问保护与打包 |
+| [macos-app](design/macos-app.md) | 已实现 | Tauri 桌面壳、共享历史与 Run 属主协调、桌面访问保护及 `onedir` 打包 |
 
 ## Milestone 写法
 

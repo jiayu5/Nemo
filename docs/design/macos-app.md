@@ -12,7 +12,7 @@ flowchart LR
     Window -->|启动/退出、连接信息| Sidecar["Python Server sidecar"]
     UI -->|带短期令牌的 HTTP/SSE| Sidecar
     Sidecar --> Core["Nemo Core Runtime"]
-    Sidecar --> DB["~/.nemo/desktop.db"]
+    Sidecar --> DB["~/.nemo/nemo.db · 共享历史"]
     Core --> Provider["远程模型 Provider"]
 ```
 
@@ -23,9 +23,15 @@ flowchart LR
 3. Rust 的 `desktop_connection` 命令只把端口、令牌和桌面默认工作目录交给应用窗口。React 在 Tauri 环境连接此端口；浏览器开发模式仍走 `/api` 代理。
 4. 桌面端 SSE 使用带令牌的 `fetch` 流，按事件序号续读；浏览器模式保留原生 `EventSource`。
 
-随机端口避免与手动启动的固定端口 Server 冲突。首版桌面 sidecar 使用 `~/.nemo/desktop.db`；普通 CLI Server 仍使用 `~/.nemo/nemo.db`。两者可并行，但会话历史暂不互通。这样避免一个 Server 启动时把另一个 Server 的活动 Run 误判为遗留任务。桌面 sidecar 不会接管或杀死用户手动启动的 Server；统一会话历史需要后续设计跨进程所有权或单实例协调。
+随机端口避免与手动启动的固定端口 Server 冲突。桌面 sidecar 与普通 CLI Server 共用 `~/.nemo/nemo.db`；两端使用不同 HTTP 地址与认证方式，但读取同一份 Session、Run 和消息历史。SQLite WAL 允许并发读，写事务由 SQLite 串行化；`one_active_run_per_session` 索引使同一 Session 的第二次提交返回 `409`。
 
-打包应用的 sidecar 工作目录没有用户含义，因此新 Session 的默认 workspace 由桌面壳上报用户主目录；用户仍可在“Open a workspace”中改成任意存在的绝对路径。
+每个 Run 写入 `owner_id`，每个 Server 进程在数据库记录带心跳的实例。启动恢复及后台巡检只中断没有活跃属主的 Run，不会误伤另一端正在执行的任务。跨端取消写入 `cancel_requested`，属主轮询后取消；跨端审批先原子地写入回答，再由属主领取并继续执行。事件仍按 `run_id` 和序号持久化，两端均可续读。Server 意外退出后不自动重放工具；失去属主的 Run 由仍在运行的 Server 巡检，或在下一次 Server 启动时标为 `interrupted`。桌面 sidecar 不会接管或杀死用户手动启动的 Server。
+
+已打开的 React 页面定期刷新 Session 列表及当前 Session 的最新 Run，发现另一端启动的任务后订阅其事件。若两端同时提交同一 Session，后提交者收到 `409`，输入内容保留在编辑框，页面撤回未入库的乐观消息。
+
+从旧版升级时，在两端 Server 均退出且没有活动 Run 后运行 `conda run -n nemo python -m nemo.adapters.persistence.merge_desktop`。迁移会先备份 `nemo.db`、`desktop.db`，再以一个事务将旧桌面历史并入主库；原 `desktop.db` 保留，不自动删除。重复执行不会复制已有历史。
+
+打包应用的 sidecar 工作目录没有用户含义，因此新 Session 的默认 workspace 由桌面壳上报用户主目录。桌面端的“Open a workspace”使用系统目录选择器，选中的绝对路径传给 Server；取消选择不改变当前路径。浏览器端仍可手动输入路径。Tauri 仅授予 `dialog:allow-open`，不授予前端读取任意文件的权限。
 
 ## 本地访问保护
 
@@ -35,7 +41,7 @@ flowchart LR
 
 ## 进程与打包
 
-`build_sidecar.py` 在 Conda `nemo` 环境里用 PyInstaller 构建当前 Mac 架构的单文件 Server，再由 Tauri `externalBin` 放入 `.app`。用户打开打包应用时不需要预装 Python。Rust 在 App 退出时停止 sidecar；PyInstaller 的单文件启动器可能另有子进程，因此 Python 同时监测父进程，父进程消失时主动关闭 Server。若 App 意外退出，未完成的 Run 按现有启动恢复逻辑标记为 `interrupted`，不自动重放工具。
+`build_sidecar.py` 在 Conda `nemo` 环境里用 PyInstaller `--onedir` 构建当前 Mac 架构的 Server 目录，再由 Tauri `resources` 放入 `.app/Contents/Resources/binaries/nemo-server/`。Rust 从资源目录启动其中的可执行文件；用户打开打包应用时不需要预装 Python。相比原先的 `--onefile`，目录模式让模块文件在安装后保持固定路径，避免每次启动都从临时目录重新加载一套新文件。代价是应用体积变大；首次安装后的第一次启动仍可能受 macOS 文件校验影响，不承诺与后续热缓存启动同速。Rust 在 App 退出时停止 sidecar，Python 同时监测父进程，父进程消失时主动关闭 Server。若 App 意外退出，未完成的 Run 按现有启动恢复逻辑标记为 `interrupted`，不自动重放工具。
 
 开发命令：
 

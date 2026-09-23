@@ -14,7 +14,7 @@ conda run -n nemo python -m nemo.server
 
 | 项 | 桌面 sidecar |
 |---|---|
-| 数据库 | `~/.nemo/desktop.db`，与 CLI Server 的 `~/.nemo/nemo.db` 相互独立 |
+| 数据库 | `~/.nemo/nemo.db`，与 CLI Server、浏览器端共用 Session、Run 和消息历史 |
 | 地址 | `127.0.0.1` 上由系统分配的空闲端口，就绪后向 stdout 输出 `NEMO_READY:<port>` |
 | 启动令牌 | Tauri 生成并放入子进程环境变量 `NEMO_DESKTOP_TOKEN`；缺失或长度不足 24 时拒绝启动 |
 | 请求凭据 | 所有路径（含 `/health`、`/openapi.json`、SSE）都要求请求头 `X-Nemo-Token`，不匹配返回 `401` |
@@ -23,6 +23,8 @@ conda run -n nemo python -m nemo.server
 | 退出 | App 退出时结束 sidecar；Python 同时监测父进程，父进程消失即自行关闭 |
 
 令牌只存在于 Rust、Python 进程内存和已加载窗口内，不写入仓库、配置或数据库。普通 CLI Server 与浏览器开发模式不使用令牌，也不受 Origin 白名单约束。Origin 检查只是浏览器层的附加限制，真正的访问凭据是随机令牌；它不是操作系统沙箱。
+
+两个 Server 可同时使用同一 SQLite：不同 Session 的 Run 可并行；同一 Session 已有活动 Run 时，后续 `POST /sessions/{session_id}/runs` 返回 `409`。跨端查看事件、取消和审批由持久化协调，启动恢复与后台巡检只中断失去属主的 Run。旧 `desktop.db` 历史的备份与合并流程见 [macOS App 设计](../design/macos-app.md#启动与连接)。
 
 ## Prompt 如何传递
 
@@ -74,6 +76,7 @@ Content-Type: application/json
 | `POST` | `/sessions` | `workspace`、可选 `model`、`approval_mode` | `201` 创建 Session，并快照说明文件 |
 | `GET` | `/sessions` | — | 按更新时间列出 Session |
 | `GET` | `/sessions/{session_id}` | — | Session 元数据和消息数量 |
+| `DELETE` | `/sessions/{session_id}` | — | `204` 删除 Session 及其消息、Run、事件等历史；不存在返回 `404`，有活动 Run 返回 `409` |
 | `PATCH` | `/sessions/{session_id}` | 可选 `model`、`approval_mode` | 修改后续 Run 的设置 |
 | `PUT` | `/sessions/{session_id}/model` | `{"model":"selection"}` | 校验并切换后续 Run 的模型 |
 | `GET` | `/sessions/{session_id}/messages` | — | 返回脱敏后的消息历史 |

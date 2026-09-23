@@ -1,5 +1,34 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <rect x="52" y="52" width="920" height="920" rx="208" fill="#17383f"/>
-  <circle cx="784" cy="248" r="88" fill="#ed8b68"/>
-  <path d="M303 704V320L721 704V320" fill="none" stroke="#f7f4eb" stroke-width="104" stroke-linecap="round" stroke-linejoin="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 64 64" role="img" aria-labelledby="title desc" shape-rendering="crispEdges">
+  <title id="title">Nemo pixel clownfish</title>
+  <desc id="desc">A bright orange pixel clownfish with two white stripes and a cyan electronic glint on a deep teal rounded square.</desc>
+
+  <!-- The rounded tile keeps the silhouette legible in the macOS Dock. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#398692" shape-rendering="geometricPrecision"/>
+  <path d="M6 18V16C6 10.5 10.5 6 16 6H48C53.5 6 58 10.5 58 16V18" fill="none" stroke="#7DC2C1" stroke-width="1" shape-rendering="geometricPrecision"/>
+
+  <!-- Small circuit-like bubbles balance the tail without adding visual noise. -->
+  <path d="M12 13h4v4h-4zM17 9h2v2h-2zM50 46h4v4h-4z" fill="#A3F3E9"/>
+  <path d="M10 52h8v2h-8zM18 50h2v2h-2z" fill="#65B8B7"/>
+
+  <!-- Dark pixel outline: forked tail, dorsal fin, body and lower fin. -->
+  <path d="M8 20h4v2h4v2h4v-4h4v-4h6v-4h8v4h6v4h6v4h4v4h4v8h-4v4h-4v4h-6v4h-6v4h-8v-4h-6v-4h-4v-4h-4v2h-4v2H8V20z" fill="#071F27"/>
+
+  <!-- Orange mass, stepped fins and a warmer face. -->
+  <path d="M10 24h4v2h4v2h5v-6h4v-4h4v-4h6v4h6v4h6v4h4v4h3v4h-3v4h-4v4h-6v4h-6v4h-6v-4h-4v-4h-4v-4h-5v2h-4v2h-4v-6h4v-4h-4z" fill="#F26B39"/>
+  <path d="M37 18h6v4h6v4h4v4h3v4h-3v4h-4v4h-6v4h-6z" fill="#FF8A47"/>
+  <path d="M12 26h4v2h4v8h-4v2h-4v2h-2v-6h4v-4h-4v-6h2z" fill="#D84F31"/>
+
+  <!-- Two broad clownfish bands; the dark seams keep them distinct at 32 px. -->
+  <path d="M27 19h6v4h2v18h-2v4h-6v-4h-2V23h2z" fill="#08252D"/>
+  <path d="M28 20h4v4h2v16h-2v4h-4v-4h-2V24h2z" fill="#F8FAED"/>
+  <path d="M39 23h5v4h2v10h-2v4h-5v-4h-2V27h2z" fill="#08252D"/>
+  <path d="M40 24h3v4h2v8h-2v4h-3v-4h-2v-8h2z" fill="#F8FAED"/>
+
+  <!-- Face: one bright eye and a two-pixel smile. -->
+  <path d="M49 29h3v3h-3z" fill="#071F27"/>
+  <path d="M50 29h1v1h-1z" fill="#FFFFFF"/>
+  <path d="M52 37h3v2h-3z" fill="#8D3329"/>
+
+  <!-- Tiny digital highlight on the fin. -->
+  <path d="M34 16h2v2h-2zM21 31h2v2h-2z" fill="#FFC178"/>
 </svg>

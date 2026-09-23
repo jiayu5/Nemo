@@ -51,11 +51,25 @@ class RunManager:
         self._cancel: dict[str, asyncio.Event] = {}
         self._approval_waiters: dict[str, asyncio.Future[ApprovalOutcome]] = {}
         self._steps: dict[str, int] = {}
+        self._cancel_monitors: dict[str, asyncio.Task[None]] = {}
+        self._reaper: asyncio.Task[None] | None = None
 
     async def startup(self) -> list[str]:
-        return self.repository.recover_interrupted_runs()
+        recovered = self.repository.recover_interrupted_runs()
+        if self._reaper is None:
+            self._reaper = asyncio.create_task(self._reap_orphans(), name="nemo-run-reaper")
+        return recovered
+
+    async def _reap_orphans(self) -> None:
+        while True:
+            await asyncio.sleep(2)
+            self.repository.recover_interrupted_runs()
 
     async def shutdown(self) -> None:
+        if self._reaper is not None:
+            self._reaper.cancel()
+            await asyncio.gather(self._reaper, return_exceptions=True)
+            self._reaper = None
         tasks = list(self._tasks.items())
         for _, task in tasks:
             task.cancel()
@@ -63,6 +77,10 @@ class RunManager:
             await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
         for run_id, _ in tasks:
             self.repository.interrupt_run(run_id)
+        for monitor in self._cancel_monitors.values():
+            monitor.cancel()
+        if self._cancel_monitors:
+            await asyncio.gather(*self._cancel_monitors.values(), return_exceptions=True)
         for future in self._approval_waiters.values():
             if not future.done():
                 future.cancel()
@@ -89,8 +107,20 @@ class RunManager:
             name=f"nemo-run-{run_id}",
         )
         self._tasks[run_id] = task
+        self._cancel_monitors[run_id] = asyncio.create_task(
+            self._monitor_cancel(run_id, cancel, task), name=f"nemo-cancel-{run_id}"
+        )
         task.add_done_callback(lambda _: self._release(run_id))
         return run_view(row)
+
+    async def _monitor_cancel(
+        self, run_id: str, cancel: asyncio.Event, task: asyncio.Task[None]
+    ) -> None:
+        while not task.done():
+            if self.repository.cancel_requested(run_id):
+                cancel.set()
+                return
+            await asyncio.sleep(0.1)
 
     def get(self, run_id: str) -> dict[str, Any]:
         row = self.repository.get_run(run_id)
@@ -106,8 +136,8 @@ class RunManager:
             return "already_terminal"
         cancel = self._cancel.get(run_id)
         if cancel is None:
-            self.repository.interrupt_run(run_id)
-            return "already_terminal"
+            self.repository.request_cancel(run_id)
+            return "accepted"
         cancel.set()
         return "accepted"
 
@@ -123,12 +153,13 @@ class RunManager:
         if approval is None or approval["run_id"] != run_id:
             raise ApprovalNotFoundError(request_id)
         future = self._approval_waiters.get(request_id)
-        if approval["status"] != "pending" or future is None or future.done():
+        if approval["status"] != "pending" or (future is not None and future.done()):
             raise ApprovalConflictError("approval is no longer pending")
         if not self.repository.answer_approval(request_id, outcome.value):
             raise ApprovalConflictError("approval is no longer pending")
-        self._record_approval_outcome(run_id, request_id, outcome)
-        future.set_result(outcome)
+        if future is not None:
+            self._record_approval_outcome(run_id, request_id, outcome)
+            future.set_result(outcome)
 
     async def _execute(
         self,
@@ -177,7 +208,8 @@ class RunManager:
 
             def persist(event: Event) -> None:
                 self._steps[run_id] = event.step
-                self.repository.append_runtime_event(event)
+                if event.type not in {f"run.{status}" for status in TERMINAL_STATUSES}:
+                    self.repository.append_runtime_event(event)
 
             result = await runtime.run(
                 prompt,
@@ -187,7 +219,7 @@ class RunManager:
                 history=self.repository.messages(session["session_id"]),
                 run_id=run_id,
             )
-            self.repository.finish_run(result)
+            self.repository.finish_run(result, terminal_event=result.events[-1])
         except asyncio.CancelledError:
             self.repository.interrupt_run(run_id)
             raise
@@ -223,18 +255,26 @@ class RunManager:
                 step=self._steps.get(run_id, 0),
             )
             try:
-                return await asyncio.wait_for(future, timeout=self._approval_timeout)
-            except asyncio.TimeoutError:
-                self.repository.answer_approval(request_id, ApprovalOutcome.DENY.value)
-                self._record_approval_outcome(
-                    run_id, request_id, ApprovalOutcome.DENY
-                )
-                return ApprovalOutcome.DENY
+                deadline = asyncio.get_running_loop().time() + self._approval_timeout
+                while True:
+                    remaining = deadline - asyncio.get_running_loop().time()
+                    if remaining <= 0:
+                        if self.repository.answer_approval(request_id, ApprovalOutcome.DENY.value):
+                            self._record_approval_outcome(run_id, request_id, ApprovalOutcome.DENY)
+                            return ApprovalOutcome.DENY
+                    try:
+                        return await asyncio.wait_for(
+                            asyncio.shield(future), timeout=max(0.01, min(0.1, remaining))
+                        )
+                    except asyncio.TimeoutError:
+                        row = self.repository.get_approval(request_id)
+                        if row is not None and row["status"] == "answered":
+                            outcome = ApprovalOutcome(row["outcome"])
+                            self._record_approval_outcome(run_id, request_id, outcome)
+                            return outcome
             except asyncio.CancelledError:
-                self.repository.answer_approval(request_id, ApprovalOutcome.DENY.value)
-                self._record_approval_outcome(
-                    run_id, request_id, ApprovalOutcome.DENY
-                )
+                if self.repository.answer_approval(request_id, ApprovalOutcome.DENY.value):
+                    self._record_approval_outcome(run_id, request_id, ApprovalOutcome.DENY)
                 raise
             finally:
                 self._approval_waiters.pop(request_id, None)
@@ -252,6 +292,9 @@ class RunManager:
         )
 
     def _release(self, run_id: str) -> None:
+        monitor = self._cancel_monitors.pop(run_id, None)
+        if monitor is not None:
+            monitor.cancel()
         self._tasks.pop(run_id, None)
         self._cancel.pop(run_id, None)
         self._steps.pop(run_id, None)

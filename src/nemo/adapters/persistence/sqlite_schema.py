@@ -31,10 +31,17 @@ CREATE TABLE IF NOT EXISTS runs (
     error TEXT,
     created_at TEXT NOT NULL,
     started_at TEXT,
-    finished_at TEXT
+    finished_at TEXT,
+    owner_id TEXT,
+    cancel_requested INTEGER NOT NULL DEFAULT 0
 );
 CREATE UNIQUE INDEX IF NOT EXISTS one_active_run_per_session
     ON runs(session_id) WHERE status IN ('queued', 'running');
+CREATE TABLE IF NOT EXISTS server_instances (
+    instance_id TEXT PRIMARY KEY,
+    pid INTEGER NOT NULL,
+    heartbeat_at TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS events (
     run_id TEXT NOT NULL REFERENCES runs(run_id) ON DELETE CASCADE,
     seq INTEGER NOT NULL,
@@ -83,11 +90,15 @@ RUN_IDENTITY_COLUMNS = {
     "model_protocol": "TEXT",
     "model_provider": "TEXT",
 }
+RUN_COORDINATION_COLUMNS = {
+    "owner_id": "TEXT",
+    "cancel_requested": "INTEGER NOT NULL DEFAULT 0",
+}
 
 
 def initialize_schema(connection: sqlite3.Connection) -> None:
     connection.executescript(SCHEMA)
-    for column, declaration in RUN_IDENTITY_COLUMNS.items():
+    for column, declaration in (RUN_IDENTITY_COLUMNS | RUN_COORDINATION_COLUMNS).items():
         _ensure_column(connection, "runs", column, declaration)
 
 

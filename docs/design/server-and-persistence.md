@@ -71,7 +71,7 @@ Trace 由持久化事件和物化数据组装。Token 不可用时保持 `null`�
 
 - Session/Run 创建、查询、取消、审批和事件续读可通过 HTTP 完成。
 - 同一 Session 的并发 Run 返回冲突。
-- 重启后历史可查询，遗留活动 Run 变为 `interrupted`。
+- 重启后历史可查询，仅失去活跃属主的 Run 变为 `interrupted`；另一端仍在运行的任务不受影响。
 - API、SQLite、事件和 Trace 不包含密钥。
 - Core 不依赖 FastAPI 或 SQLite。
 

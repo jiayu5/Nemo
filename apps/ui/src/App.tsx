@@ -40,6 +40,8 @@ export default function App() {
           selected={workspace.selected}
           workspace={workspace.workspace}
           onWorkspaceChange={workspace.setWorkspace}
+          onBrowse={() => void workspace.pickWorkspace()}
+          onDelete={workspace.deleteSession}
           onCreate={workspace.createSession}
           onSelect={(session) => void workspace.selectSession(session)}
         />

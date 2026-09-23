@@ -50,6 +50,9 @@ class SessionService:
     def get(self, session_id: str) -> dict[str, Any]:
         return session_view(self.repository, self.require_row(session_id))
 
+    def delete(self, session_id: str) -> None:
+        self.repository.delete_session(session_id)
+
     def update(
         self,
         session_id: str,

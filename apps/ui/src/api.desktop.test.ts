@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { api, defaultWorkspace, subscribeToRun } from "./api";
+import { api, chooseWorkspace, defaultWorkspace, subscribeToRun } from "./api";
 
 const desktop = vi.hoisted(() => ({
   invoke: vi.fn(async () => ({
@@ -8,11 +8,13 @@ const desktop = vi.hoisted(() => ({
     workspace: "/Users/desktop-user",
   })),
 }));
+const dialog = vi.hoisted(() => ({ open: vi.fn() }));
 
 vi.mock("@tauri-apps/api/core", () => ({
   isTauri: () => true,
   invoke: desktop.invoke,
 }));
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: dialog.open }));
 
 describe("desktop API transport", () => {
   beforeEach(() => {
@@ -22,6 +24,19 @@ describe("desktop API transport", () => {
   it("starts new sessions in the workspace reported by the desktop shell", async () => {
     expect(await defaultWorkspace()).toBe("/Users/desktop-user");
     expect(desktop.invoke).toHaveBeenCalledWith("desktop_connection");
+  });
+
+  it("chooses a folder and leaves the path unchanged when cancelled", async () => {
+    dialog.open.mockResolvedValueOnce("/Users/desktop-user/Projects/Nemo");
+    expect(await chooseWorkspace("/Users/desktop-user")).toBe(
+      "/Users/desktop-user/Projects/Nemo",
+    );
+    expect(dialog.open).toHaveBeenCalledWith({
+      directory: true, multiple: false, title: "Choose a workspace",
+      defaultPath: "/Users/desktop-user",
+    });
+    dialog.open.mockResolvedValueOnce(null);
+    expect(await chooseWorkspace("/Users/desktop-user")).toBeNull();
   });
 
   it("sends the desktop token to the sidecar", async () => {

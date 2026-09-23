@@ -154,6 +154,80 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(len(trace.json()["model_calls"]), 1)
                 self.assertGreaterEqual(trace.json()["duration_ms"], 0)
 
+    async def test_delete_session_cascades_history_and_missing_is_404(self):
+        service, _ = self.service([ModelResponse(content="done")])
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                created = await client.post(
+                    "/sessions", json={"workspace": str(self.root), "approval_mode": "full"}
+                )
+                session_id = created.json()["session_id"]
+                run = await client.post(
+                    f"/sessions/{session_id}/runs",
+                    json={"prompt": "hello", "max_steps": 2},
+                )
+                run_id = run.json()["run_id"]
+                await self.wait_terminal(service, run_id)
+                with sqlite3.connect(service.repository.path) as connection:
+                    before = {
+                        table: connection.execute(
+                            f"SELECT COUNT(*) FROM {table}"
+                        ).fetchone()[0]
+                        for table in ("sessions", "runs", "messages", "events", "steps")
+                    }
+                self.assertTrue(all(before.values()))
+
+                response = await client.delete(f"/sessions/{session_id}")
+                self.assertEqual(response.status_code, 204)
+                self.assertEqual(response.content, b"")
+                self.assertEqual((await client.get(f"/sessions/{session_id}")).status_code, 404)
+                self.assertEqual((await client.get(f"/runs/{run_id}")).status_code, 404)
+                self.assertEqual(
+                    (await client.delete(f"/sessions/{session_id}")).status_code, 404
+                )
+                with sqlite3.connect(service.repository.path) as connection:
+                    for table in before:
+                        self.assertEqual(
+                            connection.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0],
+                            0,
+                        )
+
+    async def test_delete_active_session_returns_409_and_preserves_history(self):
+        entered = asyncio.Event()
+
+        class BlockingModel:
+            async def generate(self, request):
+                entered.set()
+                await asyncio.Event().wait()
+
+        service = NemoApplication(
+            SQLiteRepository(self.root / "delete-active.sqlite"),
+            client_factory=lambda **_: BlockingModel(),
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        transport = httpx.ASGITransport(app=app)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                created = await client.post(
+                    "/sessions", json={"workspace": str(self.root), "approval_mode": "full"}
+                )
+                session_id = created.json()["session_id"]
+                started = await client.post(
+                    f"/sessions/{session_id}/runs",
+                    json={"prompt": "wait", "max_steps": 2},
+                )
+                run_id = started.json()["run_id"]
+                await asyncio.wait_for(entered.wait(), 1)
+                response = await client.delete(f"/sessions/{session_id}")
+                self.assertEqual(response.status_code, 409)
+                self.assertEqual((await client.get(f"/sessions/{session_id}")).status_code, 200)
+                self.assertEqual((await client.get(f"/runs/{run_id}")).status_code, 200)
+                await client.post(f"/runs/{run_id}/cancel")
+                await self.wait_terminal(service, run_id)
+
     async def test_desktop_access_requires_token_and_checks_origin(self):
         service, _ = self.service([])
         app = create_app(service=service, desktop_token="desktop-token-with-enough-entropy")
@@ -529,6 +603,72 @@ model = "primary"
         run = await self.wait_terminal(service, first["run_id"])
         self.assertEqual(run["status"], "cancelled")
 
+    async def test_other_server_keeps_live_run_and_can_cancel_it(self):
+        entered = asyncio.Event()
+
+        class BlockingModel:
+            async def generate(self, request):
+                entered.set()
+                await asyncio.Event().wait()
+
+        path = self.root / "shared.sqlite"
+        owner = NemoApplication(
+            SQLiteRepository(path), client_factory=lambda **_: BlockingModel()
+        )
+        peer = NemoApplication(
+            SQLiteRepository(path), client_factory=lambda **_: FakeModel([])
+        )
+        self.services.extend((owner, peer))
+        session = owner.create_session(
+            workspace=str(self.root), model=None, approval_mode=ApprovalMode.FULL
+        )
+        run = owner.start_run(session["session_id"], prompt="first", max_steps=2)
+        await asyncio.wait_for(entered.wait(), 1)
+        self.assertEqual(await peer.startup(), [])
+        self.assertEqual(peer.get_run(run["run_id"])["status"], "running")
+        with self.assertRaises(ActiveRunError):
+            peer.start_run(session["session_id"], prompt="second", max_steps=2)
+        self.assertEqual(peer.cancel_run(run["run_id"]), "accepted")
+        self.assertEqual((await self.wait_terminal(peer, run["run_id"]))["status"], "cancelled")
+
+    async def test_other_server_can_answer_approval(self):
+        call = ToolCall(
+            id="remote-write", name="write_file",
+            arguments={"path": "remote.txt", "content": "approved"},
+        )
+        owner, _ = self.service(
+            [ModelResponse(tool_calls=(call,)), ModelResponse(content="finished")],
+            tools=(WriteFileTool(),),
+        )
+        peer = NemoApplication(
+            SQLiteRepository(owner.repository.path),
+            client_factory=lambda **_: FakeModel([]),
+        )
+        self.services.append(peer)
+        session = owner.create_session(
+            workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK
+        )
+        run = owner.start_run(session["session_id"], prompt="write", max_steps=3)
+        request_id = None
+        for _ in range(100):
+            request = next(
+                (event for event in peer.events_after(run["run_id"], 0)
+                 if event.type == "approval.requested"), None,
+            )
+            if request:
+                request_id = request.payload["request_id"]
+                break
+            await asyncio.sleep(0.01)
+        self.assertIsNotNone(request_id)
+        peer.answer_approval(run["run_id"], request_id, ApprovalOutcome.ALLOW_ONCE)
+        self.assertEqual((await self.wait_terminal(peer, run["run_id"]))["status"], "completed")
+        self.assertEqual((self.root / "remote.txt").read_text(), "approved")
+        resolved = [
+            event for event in peer.events_after(run["run_id"], 0)
+            if event.type == "approval.resolved"
+        ]
+        self.assertEqual(len(resolved), 1)
+
     async def test_approval_round_trip_is_persisted_and_unblocks_tool(self):
         call = ToolCall(
             id="write-1",
@@ -567,7 +707,8 @@ model = "primary"
         self.assertGreaterEqual(trace["tool_calls"][0]["duration_ms"], 0)
 
     async def test_startup_marks_abandoned_runs_interrupted(self):
-        repository = SQLiteRepository(self.root / "recovery.sqlite")
+        path = self.root / "recovery.sqlite"
+        repository = SQLiteRepository(path)
         repository.create_session(
             session_id="s1",
             workspace=self.root,
@@ -577,11 +718,40 @@ model = "primary"
             project_instructions=None,
         )
         repository.create_run(run_id="r1", session_id="s1", prompt="x", max_steps=2)
+        repository.close()
+        repository = SQLiteRepository(path)
         service = NemoApplication(repository, client_factory=lambda **_: FakeModel([]))
         self.services.append(service)
         self.assertEqual(await service.startup(), ["r1"])
         self.assertEqual(service.get_run("r1")["status"], "interrupted")
         self.assertEqual(service.events_after("r1", 0)[-1].type, "run.interrupted")
+
+    async def test_recovery_removes_dead_server_lease(self):
+        path = self.root / "stale.sqlite"
+        repository = SQLiteRepository(path)
+        repository.create_session(
+            session_id="stale-session", workspace=self.root, model=None,
+            approval_mode="full", user_instructions=None, project_instructions=None,
+        )
+        repository.create_run(
+            run_id="stale-run", session_id="stale-session", prompt="x", max_steps=1,
+        )
+        with sqlite3.connect(path) as connection:
+            connection.execute(
+                "UPDATE runs SET owner_id = 'dead-owner' WHERE run_id = 'stale-run'"
+            )
+            connection.execute(
+                """INSERT INTO server_instances(instance_id, pid, heartbeat_at)
+                   VALUES ('dead-owner', 99999999, '2000-01-01T00:00:00+00:00')"""
+            )
+        self.assertEqual(repository.recover_interrupted_runs(), ["stale-run"])
+        with sqlite3.connect(path) as connection:
+            self.assertEqual(
+                connection.execute(
+                    "SELECT COUNT(*) FROM server_instances WHERE instance_id = 'dead-owner'"
+                ).fetchone()[0], 0,
+            )
+        repository.close()
 
     async def test_failed_run_persists_its_terminal_event(self):
         class BrokenModel:

@@ -136,6 +136,7 @@ const responses: Record<string, unknown> = {
   },
 };
 let runStartResponse: unknown = null;
+let runStartStatus = 200;
 
 describe("App", () => {
   beforeEach(() => {
@@ -151,6 +152,10 @@ describe("App", () => {
       "fetch",
       vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
         const path = String(input);
+        if (init?.method === "DELETE" && path === "/api/sessions/session-1") {
+          responses["/api/sessions"] = [];
+          return new Response(null, { status: 204 });
+        }
         const body =
           init?.method === "DELETE" && path === "/api/settings/providers/demo"
             ? { status: "deleted", provider_id: "demo", removed_models: ["demo-model"], default: "backup" }
@@ -158,7 +163,8 @@ describe("App", () => {
             ? runStartResponse
             : responses[path];
         return new Response(JSON.stringify(body), {
-          status: body === undefined ? 404 : 200,
+          status: body === undefined ? 404 : init?.method === "POST" && path.endsWith("/runs")
+            ? runStartStatus : 200,
           headers: { "Content-Type": "application/json" },
         });
       }),
@@ -172,6 +178,7 @@ describe("App", () => {
     delete responses["/api/sessions/session-1/runs"];
     delete responses["/api/runs/run-1/trace"];
     runStartResponse = null;
+    runStartStatus = 200;
     vi.unstubAllGlobals();
   });
 
@@ -189,6 +196,23 @@ describe("App", () => {
     expect(Array.from(modelOptions, (option) => option.textContent)).toEqual([
       "demo-model · demo",
     ]);
+  });
+
+  it("requires confirmation before deleting a session", async () => {
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "chat", approval_mode: "ask",
+      created_at: "2026-09-21T00:00:00Z", updated_at: "2026-09-21T00:00:00Z", message_count: 0,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [];
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "Delete session session-" }));
+    expect(fetch).not.toHaveBeenCalledWith("/api/sessions/session-1", expect.objectContaining({ method: "DELETE" }));
+    fireEvent.click(screen.getByRole("button", { name: "Delete session" }));
+    await waitFor(() => expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/session-1", expect.objectContaining({ method: "DELETE" }),
+    ));
+    await waitFor(() => expect(screen.getByText("Create a session to begin.")).toBeInTheDocument());
   });
 
   it("validates provider settings without exposing an existing secret", async () => {
@@ -354,6 +378,27 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("restores the prompt when another client already runs the session", async () => {
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 0,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [];
+    runStartResponse = { detail: "session already has an active run" };
+    runStartStatus = 409;
+
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask anything");
+    fireEvent.change(input, { target: { value: "second task" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run task" }));
+    expect(await screen.findByText("session already has an active run"))
+      .toBeInTheDocument();
+    expect(input).toHaveValue("second task");
+    expect(screen.getByLabelText("Conversation messages")).not.toHaveTextContent("second task");
   });
 
   it("shows model deltas before the run finishes", async () => {

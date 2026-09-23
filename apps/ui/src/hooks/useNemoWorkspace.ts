@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { FormEvent } from "react";
-import { api, defaultWorkspace, subscribeToRun } from "../api";
+import { api, chooseWorkspace, defaultWorkspace, subscribeToRun } from "../api";
 import type { RunSubscription } from "../api";
 import { isTerminalRunEvent } from "../events";
 import type {
@@ -194,6 +194,23 @@ export function useNemoWorkspace() {
     };
   }, [loadSession]);
 
+  useEffect(() => {
+    if (!serverOnline) return;
+    const timer = window.setInterval(() => {
+      void api.sessions().then(setSessions).catch(() => {});
+      if (!selected || activeRun) return;
+      void api.runs(selected.session_id).then((latest) => {
+        const newest = latest[0];
+        if (newest && newest.run_id !== runs[0]?.run_id) {
+          void loadSession(selected).catch((reason: unknown) =>
+            setError(message(reason, "Could not refresh shared session")),
+          );
+        }
+      }).catch(() => {});
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [serverOnline, selected, activeRun, runs, loadSession]);
+
   async function createSession(event: FormEvent) {
     event.preventDefault();
     try {
@@ -206,6 +223,51 @@ export function useNemoWorkspace() {
       await loadSession(session);
     } catch (reason) {
       setError(message(reason, "Could not create session"));
+    }
+  }
+
+  async function pickWorkspace() {
+    try {
+      const selectedPath = await chooseWorkspace(workspace);
+      if (selectedPath !== null) {
+        setWorkspace(selectedPath);
+        setError(null);
+      }
+    } catch (reason) {
+      setError(message(reason, "Could not open the folder picker"));
+    }
+  }
+
+  async function deleteSession(session: Session): Promise<boolean> {
+    try {
+      await api.deleteSession(session.session_id);
+      setError(null);
+      setSessions((current) => current.filter((item) => item.session_id !== session.session_id));
+      if (selected?.session_id === session.session_id) {
+        streamRef.current?.close();
+        streamRef.current = null;
+        setSelected(null);
+        setMessages([]);
+        setRuns([]);
+        setEvents([]);
+        setTrace(null);
+        setActiveRun(null);
+        setApproval(null);
+        setLiveText("");
+        setLiveReasoning("");
+      }
+      try {
+        const remaining = await refreshSessions();
+        if (selected?.session_id === session.session_id && remaining[0]) {
+          await loadSession(remaining[0]);
+        }
+      } catch (reason) {
+        setError(message(reason, "Session deleted, but the list could not refresh"));
+      }
+      return true;
+    } catch (reason) {
+      setError(message(reason, "Could not delete session"));
+      return false;
     }
   }
 
@@ -236,6 +298,11 @@ export function useNemoWorkspace() {
       setTrace(null);
       watchRun(run);
     } catch (reason) {
+      setMessages((current) => current.slice(0, -1));
+      setPrompt(text);
+      if (selected) {
+        try { await loadSession(selected); } catch { /* Keep the original error. */ }
+      }
       setError(message(reason, "Could not start run"));
       setActiveRun(null);
     }
@@ -294,7 +361,7 @@ export function useNemoWorkspace() {
     serverOnline, sessions, selected, messages, liveText, liveReasoning, runs, events, trace, models, providers,
     providerSettings,
     activeRun, approval, workspace, prompt, error, setWorkspace, setPrompt,
-    createSession, selectSession, submitPrompt, answerApproval, updateMode, updateModel,
+    createSession, pickWorkspace, deleteSession, selectSession, submitPrompt, answerApproval, updateMode, updateModel,
     selectRun, cancelRun, refreshConfiguration,
   };
 }

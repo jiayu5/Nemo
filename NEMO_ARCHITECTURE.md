@@ -206,7 +206,7 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M3 · Local Execution | 已完成 | 文件、Shell、Web 工具与执行边界 |
 | M4 · Context、CLI、Server | 已完成 | 稳定上下文、Session、审批、SQLite、HTTP/SSE |
 | M5 · React UI | 已完成 | 查询 API、React UI、Provider Settings 与安全配置写入 |
-| M6 · macOS App | 已完成 | Tauri、Python sidecar、访问保护、打包和进程收敛 |
+| M6 · macOS App | 已完成 | Tauri、Python sidecar、共享历史与 Run 属主协调、访问保护和 `onedir` 打包 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

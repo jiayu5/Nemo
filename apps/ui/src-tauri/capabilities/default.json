@@ -3,5 +3,5 @@
   "identifier": "default",
   "description": "Only the local Nemo window may call the desktop connection command.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": ["core:default", "dialog:allow-open"]
 }

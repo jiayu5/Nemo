@@ -43,6 +43,7 @@ fn desktop_connection(state: State<'_, DesktopState>) -> Result<DesktopConnectio
 fn main() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
         .invoke_handler(tauri::generate_handler![desktop_connection])
         .setup(|app| {
             let token = uuid::Uuid::new_v4().simple().to_string();
@@ -50,9 +51,10 @@ fn main() {
                 .ok()
                 .filter(|home| Path::new(home).is_dir())
                 .unwrap_or_else(|| "/".into());
+            let executable = app.path().resource_dir()?.join("binaries/nemo-server/nemo-server");
             let command = app
                 .shell()
-                .sidecar("nemo-server")?
+                .command(executable)
                 .env("NEMO_DESKTOP_TOKEN", &token);
             let (mut receiver, child) = command.spawn()?;
             app.manage(DesktopState {

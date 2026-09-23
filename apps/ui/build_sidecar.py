@@ -1,4 +1,4 @@
-"""Build the macOS Python Server binary that Tauri embeds as a sidecar."""
+"""Build the macOS Python Server directory bundled as a Tauri resource."""
 
 from __future__ import annotations
 
@@ -16,13 +16,13 @@ def main() -> None:
     if target not in {"aarch64-apple-darwin", "x86_64-apple-darwin"}:
         raise RuntimeError(f"Unsupported desktop target: {target}")
 
-    name = f"nemo-server-{target}"
+    name = "nemo-server"
     destination = root / "apps" / "ui" / "src-tauri" / "binaries" / name
     destination.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="nemo-sidecar-") as temporary:
         build_dir = Path(temporary)
         subprocess.run((
-            sys.executable, "-m", "PyInstaller", "--onefile", "--noconfirm",
+            sys.executable, "-m", "PyInstaller", "--onedir", "--noconfirm",
             "--name", name,
             "--distpath", str(build_dir / "dist"),
             "--workpath", str(build_dir / "work"),
@@ -30,7 +30,7 @@ def main() -> None:
             "--collect-submodules", "nemo",
             str(root / "src" / "nemo" / "server" / "desktop.py"),
         ), cwd=root, check=True)
-        shutil.copy2(build_dir / "dist" / name, destination)
+        shutil.copytree(build_dir / "dist" / name, destination, dirs_exist_ok=True)
     print(f"Built {destination}")
 
 

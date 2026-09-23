@@ -55,7 +55,9 @@ PATH="$HOME/.cargo/bin:$PATH" npm --prefix apps/ui run desktop:build  # 构建 .
 open apps/ui/src-tauri/target/release/bundle/macos/Nemo.app
 ```
 
-首次使用前先在 `~/.nemo/config.toml` 配好 Provider/Model，并把密钥写入权限为 `600` 的 `~/.nemo/.env`；否则应用能启动但没有可用模型。桌面端把会话保存在 `~/.nemo/desktop.db`，与 CLI/浏览器共用的 `~/.nemo/nemo.db` 相互独立。构建产物未签名、未公证，首次打开若被 Gatekeeper 拦截，用右键“打开”确认一次即可。访问条件见 [Server API 参考](docs/reference/server-api.md#桌面-sidecar-访问条件)。
+首次使用前先在 `~/.nemo/config.toml` 配好 Provider/Model，并把密钥写入权限为 `600` 的 `~/.nemo/.env`；否则应用能启动但没有可用模型。桌面端、CLI 和浏览器端共用 `~/.nemo/nemo.db` 中的会话历史；同一 Session 同时只运行一个任务。旧版桌面历史需要在两端 Server 都退出后运行 `conda run -n nemo python -m nemo.adapters.persistence.merge_desktop` 合并（会备份并保留原库）。构建产物未签名、未公证，首次打开若被 Gatekeeper 拦截，用右键“打开”确认一次即可。访问条件见 [Server API 参考](docs/reference/server-api.md#桌面-sidecar-访问条件)。
+
+桌面端点击“Open a workspace”或“Browse…”会打开 macOS 目录选择器；浏览器端仍可直接输入目录。Session 可从左侧列表删除，删除前需要二次确认；活动 Run 所在的 Session 不可删除。
 
 ## 当前能力
 
@@ -74,7 +76,7 @@ open apps/ui/src-tauri/target/release/bundle/macos/Nemo.app
 - Nemo 在本机执行，但远程模型会接收发送给 Provider 的上下文。
 - 文件工具限制在 workspace 内；`run_shell` 仍拥有当前用户的系统权限。workspace 和审批都不是操作系统沙箱。
 - Server 默认只监听 `127.0.0.1:18765`；打包应用使用随机端口并要求每次启动生成的 `X-Nemo-Token`，同时对浏览器 Origin 做白名单检查。两者都不是操作系统沙箱，拥有当前用户权限的本地程序仍可绕过。
-- 桌面应用与 CLI Server 使用不同的 SQLite 文件，会话历史暂不互通。
+- 桌面应用与 CLI Server 共用 SQLite 历史；同一 Session 的活动 Run 互斥，跨端取消与审批由 Run 属主协调。
 - `openai_compatible` 模型可流式输出正文和 Provider 提供的推理；Server 分别通过 `model.delta`、`model.reasoning_delta` SSE 事件传递增量，UI 单独展示推理。工具调用在完整组装和校验后执行。
 - 不自动重试模型或有副作用的工具；Server 重启会把未完成 Run 标记为 `interrupted`，不会重放。
 - UI 暂不编辑高级 Alias、Profile、静态 headers 或模型 parameters；这些仍可在配置文件中维护，UI 保存时会保留它们。

@@ -159,8 +159,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .sessions-panel .panel-heading > b { color: #708b90; }
 .new-session { padding: 15px 16px 17px; border-bottom: 1px solid var(--deep-line); }
 .new-session label { display: block; margin-bottom: 7px; color: #789096; font-size: 9px; }
+.workspace-picker { display: flex; gap: 6px; }
 .new-session input {
   width: 100%;
+  min-width: 0;
   padding: 9px 10px;
   color: #e8f2f0;
   background: #0b1e23;
@@ -170,6 +172,18 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   font: 9px/1.5 "SFMono-Regular", Consolas, monospace;
 }
 .new-session input:focus { border-color: var(--active); }
+.new-session input[readonly] { cursor: pointer; }
+.new-session .workspace-picker button {
+  width: auto;
+  flex: 0 0 auto;
+  margin-top: 0;
+  padding: 9px 8px;
+  color: #cae4df;
+  background: #163238;
+  border: 1px solid #315159;
+  font-size: 9px;
+}
+.new-session .workspace-picker button:hover { background: #23454b; }
 .new-session button {
   width: 100%;
   margin-top: 8px;
@@ -185,16 +199,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .new-session button span { margin-right: 4px; color: #1f6c67; }
 .session-list, .run-list, .event-list { overflow: auto; scrollbar-width: thin; }
 .session-list { padding: 10px 0; }
-.session-list button {
+.session-row { position: relative; }
+.session-list .session-open {
   position: relative;
   width: 100%;
-  padding: 11px 16px 11px 38px;
+  padding: 11px 38px 11px 38px;
   text-align: left;
   color: #b8cac7;
   background: transparent;
   border: 0;
 }
-.session-list button::before {
+.session-list .session-open::before {
   content: "";
   position: absolute;
   left: 18px;
@@ -204,10 +219,24 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   border: 1px solid #537078;
   border-radius: 50%;
 }
-.session-list button:hover { color: #edf6f4; background: #142e34; }
-.session-list button.selected { color: #fff; background: var(--deep-raised); }
-.session-list button.selected::before { border-color: var(--signal); background: var(--signal); box-shadow: 0 0 0 3px rgba(255,104,70,.12); }
-.session-list button.selected::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 2px; background: var(--signal); }
+.session-list .session-open:hover { color: #edf6f4; background: #142e34; }
+.session-list .session-open.selected { color: #fff; background: var(--deep-raised); }
+.session-list .session-open.selected::before { border-color: var(--signal); background: var(--signal); box-shadow: 0 0 0 3px rgba(255,104,70,.12); }
+.session-list .session-open.selected::after { content: ""; position: absolute; top: 0; right: 0; bottom: 0; width: 2px; background: var(--signal); }
+.session-list .session-remove {
+  position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+  width: 24px; height: 24px; padding: 0; border: 0; border-radius: 6px;
+  color: #a8bfbd; background: transparent; font-size: 18px; cursor: pointer;
+}
+.session-list .session-remove:hover, .session-list .session-remove:focus-visible {
+  color: #fff; background: #7d3f39;
+}
+.session-delete-confirm { margin: 0 12px 8px; padding: 10px; border: 1px solid #7d3f39; border-radius: 8px; color: #e4d8d4; background: #243336; }
+.session-delete-confirm p { margin: 0 0 8px; font-size: 10px; line-height: 1.4; }
+.session-delete-confirm div { display: flex; gap: 6px; justify-content: flex-end; }
+.session-delete-confirm button { padding: 5px 8px; border: 1px solid #668085; border-radius: 5px; color: #edf6f4; background: transparent; font-size: 10px; cursor: pointer; }
+.session-delete-confirm button:last-child { border-color: #a55b51; background: #7d3f39; }
+.session-delete-confirm button:disabled { opacity: .5; cursor: default; }
 .session-list span, .run-list span { display: block; overflow: hidden; font-size: 10px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .session-list small, .run-list small { display: block; margin-top: 4px; color: #688187; font-size: 8px; }
 .empty-note { margin: 0; padding: 22px 12px; color: #75878b; font-size: 9px; text-align: center; }

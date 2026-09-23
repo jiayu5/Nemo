@@ -120,6 +120,17 @@ def create_app(
         except SessionNotFoundError:
             raise HTTPException(status_code=404, detail="session not found") from None
 
+    @app.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
+    async def delete_session(session_id: str) -> None:
+        try:
+            agent_service.delete_session(session_id)
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ActiveRunError:
+            raise HTTPException(
+                status_code=409, detail="session has an active run"
+            ) from None
+
     @app.patch("/sessions/{session_id}", response_model=SessionResponse)
     async def update_session(session_id: str, body: UpdateSessionRequest) -> dict:
         try:
