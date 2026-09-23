@@ -39,6 +39,7 @@
 | [context-assembly](design/context-assembly.md) | 已实现；T1 待定 | 稳定前缀、项目说明与每轮 Reminder |
 | [cli-and-approval](design/cli-and-approval.md) | 已实现 | Session、三档审批、终端交互与脱敏 |
 | [server-and-persistence](design/server-and-persistence.md) | 已实现 | Server、SQLite、SSE 与生命周期 |
+| [model-streaming](design/model-streaming.md) | 已实现 | 模型增量、工具调用组装、事件回放与客户端显示 |
 | [ui-and-api](design/ui-and-api.md) | 已实现 | React UI、查询 API 与 Provider Settings 边界 |
 | [provider-settings](design/provider-settings.md) | 已实现 | Provider/Model 写入、密钥、Proxy 与生效语义 |
 | [web-tools](design/web-tools.md) | 已实现；搜索后端待升级 | `web_search`、`fetch_url` 与网络边界 |

@@ -109,8 +109,9 @@ export function subscribeToRun(
   runId: string,
   onEvent: (event: RunEvent) => void,
   onError: () => void,
+  after = 0,
 ): EventSource {
-  const source = new EventSource(`${API}/runs/${runId}/events`);
+  const source = new EventSource(`${API}/runs/${runId}/events?after=${after}`);
   for (const type of RUN_EVENT_TYPES) {
     source.addEventListener(type, (message) => {
       onEvent(JSON.parse((message as MessageEvent<string>).data) as RunEvent);

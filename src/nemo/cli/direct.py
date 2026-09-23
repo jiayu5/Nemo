@@ -7,6 +7,7 @@ import signal
 from pathlib import Path
 
 from nemo.bootstrap import build_local_tools
+from nemo.core.contracts.events import EventType
 from nemo.cli.approver import TerminalApprover
 from nemo.cli.render import render_event
 from nemo.cli.streams import Streams
@@ -182,6 +183,19 @@ async def run_turn(
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
     installed = False
+    streamed = False
+
+    def on_event(event):
+        nonlocal streamed
+        if event.type == EventType.MODEL_DELTA:
+            chunk = event.payload.get("text")
+            if isinstance(chunk, str) and chunk:
+                (output.write_chunk or output.write)(redact(chunk))
+                streamed = True
+            return
+        if streamed and event.type == EventType.MODEL_COMPLETED:
+            output.write("")
+        output.write(render_event(event))
     try:
         loop.add_signal_handler(signal.SIGINT, cancel.set)
         installed = True
@@ -192,7 +206,7 @@ async def run_turn(
             prompt,
             max_steps=args.max_steps,
             cancel=cancel,
-            on_event=lambda event: output.write(render_event(event)),
+            on_event=on_event,
             history=session.history(),
         )
     finally:
@@ -204,7 +218,7 @@ async def run_turn(
     output.write(f"status  : {result.state.status.value}")
     if result.state.error:
         output.write(f"error   : {redact(result.state.error)}")
-    if result.state.output:
+    if result.state.output and not streamed:
         output.write(f"\n{redact(result.state.output)}\n")
     if hidden:
         output.write(f"note: {hidden} message(s) were redacted before being written")

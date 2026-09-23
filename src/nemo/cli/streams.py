@@ -18,6 +18,7 @@ class Streams:
     read_line: Callable[[str], str | None]
     write: Callable[[str], None]
     is_tty: bool
+    write_chunk: Callable[[str], None] | None = None
 
     @classmethod
     def from_stdin(cls) -> "Streams":
@@ -27,10 +28,15 @@ class Streams:
             except EOFError:
                 return None
 
+        def write_chunk(text: str) -> None:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+
         return cls(
             read_line=read_line,
             write=lambda text: print(text),
             is_tty=sys.stdin.isatty(),
+            write_chunk=write_chunk,
         )
 
     @classmethod
@@ -49,4 +55,5 @@ class Streams:
             sink.append(prompt)
             return remaining.pop(0) if remaining else None
 
-        return cls(read_line=read_line, write=sink.append, is_tty=is_tty)
+        return cls(read_line=read_line, write=sink.append, is_tty=is_tty,
+                   write_chunk=sink.append)

@@ -125,8 +125,17 @@ async def remote_turn(
     except (NotImplementedError, RuntimeError):
         pass
     approver = TerminalApprover(output)
+    streamed = False
     try:
         async for event in client.events(run_id):
+            if event.type == EventType.MODEL_DELTA:
+                chunk = event.payload.get("text")
+                if isinstance(chunk, str) and chunk:
+                    (output.write_chunk or output.write)(redact(chunk))
+                    streamed = True
+                continue
+            if streamed and event.type == EventType.MODEL_COMPLETED:
+                output.write("")
             output.write(render_event(event))
             if event.type == EventType.APPROVAL_REQUESTED:
                 payload = event.payload
@@ -145,6 +154,6 @@ async def remote_turn(
     output.write(f"status  : {run['status']}")
     if run.get("error"):
         output.write(f"error   : {redact(run['error'])}")
-    if run.get("output"):
+    if run.get("output") and not streamed:
         output.write(f"\n{redact(run['output'])}\n")
     return 0 if run["status"] == "completed" else 1

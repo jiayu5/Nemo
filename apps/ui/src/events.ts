@@ -8,6 +8,8 @@ export const RUN_EVENT_TYPES = [
   "step.started",
   "step.completed",
   "model.started",
+  "model.delta",
+  "model.reasoning_delta",
   "model.completed",
   "tool.started",
   "tool.completed",

@@ -25,6 +25,7 @@ export interface ToolResult {
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  reasoning_content?: string;
   tool_calls: ToolCall[];
   tool_result: ToolResult | null;
 }

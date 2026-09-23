@@ -4,12 +4,14 @@ The client is created on first use so importing this module never depends on an
 running event loop.
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Any, Mapping
 
 import httpx
 
 from nemo.core.contracts.errors import TransportError
-from nemo.core.contracts.model_transport import HttpResponse
+from nemo.core.contracts.model_transport import HttpResponse, HttpStream
 from nemo.core.contracts.secrets import SecretValue
 
 
@@ -49,6 +51,20 @@ class HttpxTransport:
                 status=response.status_code, body=None, text=response.text[:300]
             )
         return HttpResponse(status=response.status_code, body=body)
+
+    @asynccontextmanager
+    async def stream_post(
+        self, url: str, *, headers: Mapping[str, str],
+        json: Mapping[str, Any], timeout: float,
+    ) -> AsyncIterator[HttpStream]:
+        client = self._ensure_client()
+        try:
+            async with client.stream("POST", url, headers=headers, json=json, timeout=timeout) as response:
+                yield HttpStream(response.status_code, response.aiter_lines())
+        except httpx.HTTPError as exc:
+            raise TransportError(
+                f"Request to {url} failed: {type(exc).__name__}"
+            ) from None
 
     async def aclose(self) -> None:
         if self._client is not None and self._owns_client:

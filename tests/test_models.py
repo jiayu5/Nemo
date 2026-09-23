@@ -27,6 +27,8 @@ from nemo.core.contracts.types import (
     Message,
     ModelRequest,
     ModelResponse,
+    ModelReasoningDelta,
+    ModelTextDelta,
     ModelUsage,
     RunStatus,
     ToolCall,
@@ -37,6 +39,7 @@ from nemo.core.contracts.types import (
 from nemo.core.models.client import ModelClient
 from nemo.core.models.registry import ModelRegistry
 from nemo.core.models.resolver import ModelResolver
+from nemo.redaction import StreamingTextRedactor
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.tools.registry import ToolRegistry
 from nemo.testing.fakes import AddTool, RecordingTransport
@@ -234,6 +237,21 @@ class AdapterTests(ModelTestCase):
         self.assertEqual(response.content, "hello")
         self.assertEqual(response.tool_calls, ())
 
+    def test_reasoning_is_returned_only_with_current_turn_tool_history(self):
+        response = self.adapter.decode_response(HttpResponse(200, {"choices": [{"message": {
+            "content": "answer", "reasoning_content": "thinking",
+        }}]}), self.secret)
+        self.assertEqual(response.reasoning_content, "thinking")
+        request = ModelRequest(messages=(
+            Message(role="assistant", content="old", reasoning_content="old thought"),
+            Message(role="user", content="new question"),
+            Message(role="assistant", content="using tool", reasoning_content="new thought"),
+            Message(role="user", content="<reminder>step 2 of 10</reminder>"),
+        ), tools=())
+        encoded = self.adapter.encode_request(request, self.resolved, self.secret).body["messages"]
+        self.assertNotIn("reasoning_content", encoded[0])
+        self.assertEqual(encoded[2]["reasoning_content"], "new thought")
+
     def test_decodes_usage_shape_captured_from_a_real_response(self):
         """Field shape verified against a live DeepSeek reply on 2026-09-17."""
 
@@ -386,6 +404,82 @@ class ClientTests(ModelTestCase):
                 "https://mirror.example.com/v1/chat/completions",
             ],
         )
+
+    def test_streamed_text_tools_usage_and_secret_splits(self):
+        frames = [
+            {"choices": [{"delta": {"content": "Hello "}}]},
+            {"choices": [{"delta": {"content": "sk-abc"}}]},
+            {"choices": [{"delta": {"content": "defghi world "}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "call-1", "function": {"name": "add", "arguments": '{"a":'}}]}}]},
+            {"choices": [{"delta": {"tool_calls": [{"index": 0, "function": {"arguments": "12,\"b\":30}"}}]}}]},
+            {"choices": [], "usage": {"prompt_tokens": 8, "completion_tokens": 5}},
+        ]
+        raw = "".join(f"data: {json.dumps(frame)}\n\n" for frame in frames) + "data: [DONE]\n\n"
+        sent = []
+
+        def answer(request):
+            sent.append(json.loads(request.content))
+            return httpx.Response(200, text=raw)
+
+        async def run():
+            async with httpx.AsyncClient(transport=httpx.MockTransport(answer)) as http_client:
+                model = self.client(HttpxTransport(http_client))
+                parts = [part async for part in model.stream(ModelRequest(messages=(), tools=()))]
+                return parts
+
+        parts = asyncio.run(run())
+        self.assertTrue(sent[0]["stream"])
+        self.assertEqual("".join(part.text for part in parts[:-1]), "Hello sk-[redacted] world ")
+        self.assertEqual(parts[-1].content, "Hello sk-abcdefghi world ")
+        self.assertEqual(parts[-1].tool_calls[0].arguments, {"a": 12, "b": 30})
+        self.assertEqual(parts[-1].usage.total_tokens, 13)
+
+    def test_streamed_reasoning_is_separate_and_redacted(self):
+        frames = [
+            {"choices": [{"delta": {"reasoning_content": "Think sk-abc"}}]},
+            {"choices": [{"delta": {"reasoning_content": "defghi first "}}]},
+            {"choices": [{"delta": {"content": "Answer"}}]},
+        ]
+        raw = "".join(f"data: {json.dumps(frame)}\n\n" for frame in frames) + "data: [DONE]\n\n"
+
+        async def run():
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda _: httpx.Response(200, text=raw))
+            ) as http_client:
+                model = self.client(HttpxTransport(http_client))
+                return [part async for part in model.stream(ModelRequest(messages=(), tools=()))]
+
+        parts = asyncio.run(run())
+        self.assertEqual("".join(part.text for part in parts if isinstance(part, ModelReasoningDelta)),
+                         "Think sk-[redacted] first ")
+        self.assertEqual("".join(part.text for part in parts if isinstance(part, ModelTextDelta)),
+                         "Answer")
+        self.assertEqual(parts[-1].reasoning_content, "Think sk-abcdefghi first ")
+
+    def test_stream_rejects_truncation_and_never_yields_tool_fragments(self):
+        raw = 'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"c","function":{"name":"add","arguments":"{\\"a\\":"}}]}}]}\n\n'
+
+        async def run():
+            async with httpx.AsyncClient(
+                transport=httpx.MockTransport(lambda _: httpx.Response(200, text=raw))
+            ) as http_client:
+                model = self.client(HttpxTransport(http_client))
+                return [part async for part in model.stream(ModelRequest(messages=(), tools=()))]
+
+        with self.assertRaises(ResponseFormatError):
+            asyncio.run(run())
+
+    def test_streaming_redaction_keeps_split_bearer_token_private(self):
+        redactor = StreamingTextRedactor()
+        visible = "".join(redactor.feed(piece) for piece in ("Bearer ", "secret", "value "))
+        visible += redactor.finish()
+        self.assertEqual(visible, "Bearer [redacted] ")
+
+    def test_streaming_redaction_keeps_mixed_script_secret_private(self):
+        redactor = StreamingTextRedactor()
+        visible = "".join(redactor.feed(piece) for piece in ("Bearer ", "abc", "中文", "def "))
+        visible += redactor.finish()
+        self.assertEqual(visible, "Bearer [redacted] ")
 
 class ModelSystemIntegrationTests(ModelTestCase):
     def test_client_drives_the_unchanged_runtime_loop(self):

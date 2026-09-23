@@ -40,7 +40,7 @@ flowchart LR
 2. 创建 Run 时保存 queued Run 和脱敏 Prompt。
 3. 后台 task 装配 Runtime，并把事件写入 SQLite 和 SSE。
 4. 需要审批时 Runtime 等待客户端通过专用接口回答。
-5. 正常收敛时在一个事务中写入终态并追加本轮 Session 消息；SSE 发完剩余事件后关闭。
+5. Run 收敛时在一个事务中写入终态并追加本轮 Session 消息；SSE 发完剩余事件后关闭。流式增量的回放与临时回复见 [模型流式回复](model-streaming.md)。
 
 同一 Session 只允许一个活动 Run。SSE 断线不取消执行；客户端按事件序号续读。Server 启动时把遗留活动 Run 标记为 `interrupted`，不重放可能有副作用的工具。
 

@@ -7,7 +7,8 @@ from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.reminder import describe, fit_reminders, slot_open, step_budget
 from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import (
-    AgentState, Event, Message, Model, ModelUsage, RunResult, RunStatus,
+    AgentState, Event, Message, Model, ModelReasoningDelta, ModelResponse, ModelTextDelta,
+    ModelUsage, RunResult, RunStatus,
 )
 from nemo.core.tools.registry import ToolRegistry
 
@@ -36,6 +37,8 @@ class AgentRuntime:
             + [Message(role="user", content=prompt)]
         )
         events: list[Event] = []
+        partial_text: list[str] = []
+        partial_reasoning: list[str] = []
 
         def emit(kind: str, **payload):
             event = Event(run_id=state.run_id, seq=len(events) + 1,
@@ -65,10 +68,32 @@ class AgentRuntime:
                 reminders = fit_reminders((step_budget(step, max_steps),)) if slot_open(state) else ()
                 request = self.context.build(state, self.tools, reminders)
                 emit(EventType.MODEL_STARTED, reminders=describe(reminders))
-                response = await self.model.generate(request)
+                partial_text.clear()
+                partial_reasoning.clear()
+                streamer = getattr(self.model, "stream", None)
+                if streamer is None:
+                    response = await self.model.generate(request)
+                else:
+                    response: ModelResponse | None = None
+                    async for part in streamer(request):
+                        if isinstance(part, ModelTextDelta):
+                            partial_text.append(part.text)
+                            emit(EventType.MODEL_DELTA, text=part.text)
+                        elif isinstance(part, ModelReasoningDelta):
+                            partial_reasoning.append(part.text)
+                            emit(EventType.MODEL_REASONING_DELTA, text=part.text)
+                        elif isinstance(part, ModelResponse):
+                            response = part
+                        else:
+                            raise TypeError("Model stream returned an unknown item")
+                    if response is None:
+                        raise ValueError("Model stream ended without a final response")
                 emit(EventType.MODEL_COMPLETED, tool_call_count=len(response.tool_calls),
                      **_usage_payload(response.usage))
+                partial_text.clear()
+                partial_reasoning.clear()
                 state.messages.append(Message(role="assistant", content=response.content,
+                                              reasoning_content=response.reasoning_content,
                                               tool_calls=response.tool_calls))
                 if not response.tool_calls:
                     state.output = response.content
@@ -106,12 +131,20 @@ class AgentRuntime:
                 await worker
         except asyncio.CancelledError:
             state.status = RunStatus.CANCELLED
+            if partial_text or partial_reasoning:
+                state.output = "".join(partial_text)
+                state.messages.append(Message(role="assistant", content=state.output,
+                                              reasoning_content="".join(partial_reasoning)))
             # Explicit cancel Event returns a result; task.cancel() retains normal
             # asyncio cancellation semantics after cleanup and terminal emission.
             if asyncio.current_task().cancelling():
                 raise
         except Exception as exc:
             state.status = RunStatus.FAILED
+            if partial_text or partial_reasoning:
+                state.output = "".join(partial_text)
+                state.messages.append(Message(role="assistant", content=state.output,
+                                              reasoning_content="".join(partial_reasoning)))
             # Only a curated, secret-free message is exposed; the raw exception
             # text never reaches the result or the event stream.
             state.error = getattr(exc, "public_message", None) or "Runtime execution failed"

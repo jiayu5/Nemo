@@ -117,7 +117,7 @@ sequenceDiagram
         Server->>Store: 持久化事件和物化视图
         Server-->>Client: SSE
     end
-    Server->>Store: 正常收敛时追加本轮 Session 消息
+    Server->>Store: Run 收敛时追加本轮 Session 消息
 ```
 
 关键语义：
@@ -138,7 +138,9 @@ sequenceDiagram
 
 当前只实现 `openai_compatible` adapter。`openai_responses` 与 `anthropic_messages` 是受支持的配置字面量，但没有 adapter；配置后会明确失败，不会静默切换协议。
 
-模型当前返回完整响应，不提供 token delta。Server 的 SSE 只承载 Run 领域事件。配置格式和密钥规则见 [配置参考](docs/reference/configuration.md)。
+`openai_compatible` 模型调用可读取流式 Chat Completions。Runtime 将脱敏、合批后的正文与可选推理分别作为 `model.delta` 和 `model.reasoning_delta` 事件送往 Server；工具调用片段在 adapter 内组装为完整参数并校验后才进入执行循环。Server 将事件持久化并用 SSE 序号支持断线续读，完整助手消息在 Run 收敛时写入 Session。详细机制见 [模型流式回复设计](docs/design/model-streaming.md)。
+
+Runtime 在流式增量结束后仍取得完整 `ModelResponse`，用它完成工具调用和会话持久化；不支持流式的测试模型可继续返回完整响应。配置格式和密钥规则见 [配置参考](docs/reference/configuration.md)。
 
 ### Context
 
@@ -169,7 +171,7 @@ Server 是 Session、Run、审批和持久化的唯一生命周期所有者。�
 
 Provider Settings 通过 Server 校验候选配置，并以原子替换写入 `~/.nemo/config.toml` 与权限为 `0600` 的 `~/.nemo/.env`。环境变量是只读高优先级来源；保存后的配置用于新 Run，活动 Run 不热切换。
 
-SQLite 保存 Sessions、Messages、Runs、Approvals、Events，以及 Step 和 Tool Call 的查询视图。Prompt 由 HTTP JSON 进入内存并立即写入脱敏后的 Run 记录；Run 正常收敛时，本轮完整消息再追加到 Session 历史。不会生成独立的 Prompt JSON 文件。完整接口见 [Server API](docs/reference/server-api.md)。
+SQLite 保存 Sessions、Messages、Runs、Approvals、Events，以及 Step 和 Tool Call 的查询视图。Prompt 由 HTTP JSON 进入内存并立即写入脱敏后的 Run 记录；Run 收敛时，本轮消息再追加到 Session 历史。取消或流式失败时，历史可能包含已显示的部分回复。不会生成独立的 Prompt JSON 文件。完整接口见 [Server API](docs/reference/server-api.md)。
 
 安全边界：
 

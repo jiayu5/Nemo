@@ -13,6 +13,8 @@ class EventType(StrEnum):
     STEP_STARTED = "step.started"
     STEP_COMPLETED = "step.completed"
     MODEL_STARTED = "model.started"
+    MODEL_DELTA = "model.delta"
+    MODEL_REASONING_DELTA = "model.reasoning_delta"
     MODEL_COMPLETED = "model.completed"
     TOOL_STARTED = "tool.started"
     TOOL_COMPLETED = "tool.completed"

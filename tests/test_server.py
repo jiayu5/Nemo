@@ -14,7 +14,7 @@ from nemo.config.editor import ConfigEditor
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.model_config import AppConfig
-from nemo.core.contracts.types import ModelResponse, ToolCall
+from nemo.core.contracts.types import ModelResponse, ModelTextDelta, ToolCall
 from nemo.core.models.registry import ModelRegistry
 from nemo.core.models.resolver import ModelResolver
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
@@ -153,6 +153,48 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(trace.json()["run"]["run_id"], run_id)
                 self.assertEqual(len(trace.json()["model_calls"]), 1)
                 self.assertGreaterEqual(trace.json()["duration_ms"], 0)
+
+    async def test_streamed_text_is_replayed_through_run_sse(self):
+        class StreamingModel:
+            async def stream(self, request):
+                yield ModelTextDelta(text="Hello ")
+                yield ModelTextDelta(text="stream")
+                yield ModelResponse(content="Hello stream")
+
+        service = NemoApplication(
+            SQLiteRepository(self.root / "streaming.sqlite"),
+            client_factory=lambda **_: StreamingModel(),
+        )
+        self.services.append(service)
+        app = create_app(service=service)
+        async with app.router.lifespan_context(app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://test"
+            ) as client:
+                created = await client.post(
+                    "/sessions", json={"workspace": str(self.root), "approval_mode": "full"}
+                )
+                run = await client.post(
+                    f"/sessions/{created.json()['session_id']}/runs",
+                    json={"prompt": "hello", "max_steps": 1},
+                )
+                run_id = run.json()["run_id"]
+                await self.wait_terminal(service, run_id)
+
+                response = await client.get(f"/runs/{run_id}/events")
+                self.assertIn("event: model.delta", response.text)
+                self.assertIn('"text":"Hello "', response.text)
+                first_delta = next(
+                    event for event in service.events_after(run_id, 0)
+                    if event.type == "model.delta"
+                )
+                replay = await client.get(f"/runs/{run_id}/events?after={first_delta.seq}")
+                self.assertNotIn('"text":"Hello "', replay.text)
+                self.assertIn('"text":"stream"', replay.text)
+                messages = (await client.get(
+                    f"/sessions/{created.json()['session_id']}/messages"
+                )).json()
+                self.assertEqual(messages[-1]["content"], "Hello stream")
 
     async def test_model_provider_catalog_and_connection_test(self):
         config = self.config()

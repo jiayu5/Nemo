@@ -6,12 +6,14 @@ core to stay ignorant of vendors, HTTP and fixtures alike.
 """
 
 from dataclasses import dataclass
+from collections.abc import AsyncIterator
+from contextlib import AbstractAsyncContextManager
 from typing import Any, Mapping, Protocol
 
 from nemo.core.contracts.errors import NemoError
 from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.secrets import SecretValue
-from nemo.core.contracts.types import ModelRequest, ModelResponse
+from nemo.core.contracts.types import ModelReasoningDelta, ModelRequest, ModelResponse, ModelTextDelta
 
 
 @dataclass(frozen=True)
@@ -40,6 +42,12 @@ class HttpResponse:
     text: str = ""
 
 
+@dataclass(frozen=True)
+class HttpStream:
+    status: int
+    lines: AsyncIterator[str]
+
+
 class Transport(Protocol):
     async def post(
         self,
@@ -50,6 +58,11 @@ class Transport(Protocol):
         timeout: float,
     ) -> HttpResponse: ...
 
+    def stream_post(
+        self, url: str, *, headers: Mapping[str, str],
+        json: Mapping[str, Any], timeout: float,
+    ) -> AbstractAsyncContextManager[HttpStream]: ...
+
 
 class ProtocolAdapter(Protocol):
     protocol: str
@@ -59,5 +72,9 @@ class ProtocolAdapter(Protocol):
     ) -> EncodedRequest: ...
 
     def decode_response(self, response: HttpResponse, secret: SecretValue) -> ModelResponse: ...
+
+    def decode_stream(
+        self, lines: AsyncIterator[str]
+    ) -> AsyncIterator[ModelTextDelta | ModelReasoningDelta | ModelResponse]: ...
 
     def decode_error(self, response: HttpResponse, secret: SecretValue) -> NemoError: ...

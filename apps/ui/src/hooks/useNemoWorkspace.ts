@@ -24,6 +24,8 @@ export function useNemoWorkspace() {
   const [sessions, setSessions] = useState<Session[]>([]);
   const [selected, setSelected] = useState<Session | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
+  const [liveText, setLiveText] = useState("");
+  const [liveReasoning, setLiveReasoning] = useState("");
   const [runs, setRuns] = useState<Run[]>([]);
   const [events, setEvents] = useState<RunEvent[]>([]);
   const [trace, setTrace] = useState<Trace | null>(null);
@@ -37,7 +39,60 @@ export function useNemoWorkspace() {
   const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<EventSource | null>(null);
 
+  async function finishRun(runId: string, sessionId: string) {
+    streamRef.current?.close();
+    streamRef.current = null;
+    setActiveRun(null);
+    setApproval(null);
+    const [history, sessionRuns, runTrace, sessionItems] = await Promise.all([
+      api.messages(sessionId),
+      api.runs(sessionId),
+      api.trace(runId),
+      api.sessions(),
+    ]);
+    setMessages(history);
+    setLiveText("");
+    setLiveReasoning("");
+    setRuns(sessionRuns);
+    setTrace(runTrace);
+    setEvents(runTrace.events.filter((item) => item.type !== "model.delta" && item.type !== "model.reasoning_delta"));
+    setSessions(sessionItems);
+    setSelected(sessionItems.find((item) => item.session_id === sessionId) ?? null);
+  }
+
+  function watchRun(run: Run, after = 0) {
+    streamRef.current?.close();
+    streamRef.current = subscribeToRun(
+      run.run_id,
+      (runEvent) => {
+        if (runEvent.type === "model.delta") {
+          const text = runEvent.payload.text;
+          if (typeof text === "string") setLiveText((current) => current + text);
+        } else if (runEvent.type === "model.reasoning_delta") {
+          const text = runEvent.payload.text;
+          if (typeof text === "string") setLiveReasoning((current) => current + text);
+        } else {
+          setEvents((current) => [...current, runEvent]);
+        }
+        if (runEvent.type === "approval.requested") {
+          setApproval(runEvent.payload as unknown as ApprovalRequest);
+        }
+        if (isTerminalRunEvent(runEvent.type)) {
+          void finishRun(run.run_id, run.session_id).catch((reason: unknown) =>
+            setError(message(reason, "Could not refresh completed run")),
+          );
+        }
+      },
+      () => setError("Event stream disconnected; reconnecting to the Run."),
+      after,
+    );
+  }
+
   const loadSession = useCallback(async (session: Session) => {
+    streamRef.current?.close();
+    streamRef.current = null;
+    setActiveRun(null);
+    setApproval(null);
     setSelected(session);
     setError(null);
     const [history, sessionRuns] = await Promise.all([
@@ -45,12 +100,40 @@ export function useNemoWorkspace() {
       api.runs(session.session_id),
     ]);
     setMessages(history);
+    setLiveText("");
+    setLiveReasoning("");
     setRuns(sessionRuns);
     const newest = sessionRuns[0];
     if (newest) {
       const newestTrace = await api.trace(newest.run_id);
       setTrace(newestTrace);
-      setEvents(newestTrace.events);
+      setEvents(newestTrace.events.filter((item) => item.type !== "model.delta" && item.type !== "model.reasoning_delta"));
+      if (newest.status === "queued" || newest.status === "running") {
+        if (newestTrace.run.status !== "queued" && newestTrace.run.status !== "running") {
+          await finishRun(newest.run_id, session.session_id);
+          return;
+        }
+        setLiveText(newestTrace.events
+          .filter((item) => item.type === "model.delta")
+          .map((item) => item.payload.text)
+          .filter((value): value is string => typeof value === "string")
+          .join(""));
+        setLiveReasoning(newestTrace.events
+          .filter((item) => item.type === "model.reasoning_delta")
+          .map((item) => item.payload.text)
+          .filter((value): value is string => typeof value === "string")
+          .join(""));
+        setActiveRun(newest);
+        const pending = [...newestTrace.events].reverse().find(
+          (item) => item.type === "approval.requested",
+        );
+        const answered = pending && newestTrace.events.some(
+          (item) => item.type === "approval.resolved" &&
+            item.payload.request_id === pending.payload.request_id,
+        );
+        if (pending && !answered) setApproval(pending.payload as unknown as ApprovalRequest);
+        watchRun(newest, newestTrace.events.at(-1)?.seq ?? 0);
+      }
     } else {
       setTrace(null);
       setEvents([]);
@@ -125,31 +208,13 @@ export function useNemoWorkspace() {
     }
   }
 
-  async function finishRun(runId: string) {
-    streamRef.current?.close();
-    streamRef.current = null;
-    setActiveRun(null);
-    setApproval(null);
-    if (!selected) return;
-    const [history, sessionRuns, runTrace, sessionItems] = await Promise.all([
-      api.messages(selected.session_id),
-      api.runs(selected.session_id),
-      api.trace(runId),
-      api.sessions(),
-    ]);
-    setMessages(history);
-    setRuns(sessionRuns);
-    setTrace(runTrace);
-    setEvents(runTrace.events);
-    setSessions(sessionItems);
-    setSelected(sessionItems.find((item) => item.session_id === selected.session_id) ?? selected);
-  }
-
   async function submitPrompt(event: FormEvent) {
     event.preventDefault();
     if (!selected || !prompt.trim() || activeRun) return;
     const text = prompt.trim();
     setPrompt("");
+    setLiveText("");
+    setLiveReasoning("");
     setError(null);
     setMessages((current) => [
       ...current,
@@ -160,21 +225,7 @@ export function useNemoWorkspace() {
       setActiveRun(run);
       setEvents([]);
       setTrace(null);
-      streamRef.current = subscribeToRun(
-        run.run_id,
-        (runEvent) => {
-          setEvents((current) => [...current, runEvent]);
-          if (runEvent.type === "approval.requested") {
-            setApproval(runEvent.payload as unknown as ApprovalRequest);
-          }
-          if (isTerminalRunEvent(runEvent.type)) {
-            void finishRun(run.run_id).catch((reason: unknown) =>
-              setError(message(reason, "Could not refresh completed run")),
-            );
-          }
-        },
-        () => setError("Event stream disconnected; the Run may still be active."),
-      );
+      watchRun(run);
     } catch (reason) {
       setError(message(reason, "Could not start run"));
       setActiveRun(null);
@@ -215,7 +266,7 @@ export function useNemoWorkspace() {
     try {
       const value = await api.trace(run.run_id);
       setTrace(value);
-      setEvents(value.events);
+      setEvents(value.events.filter((item) => item.type !== "model.delta" && item.type !== "model.reasoning_delta"));
     } catch (reason) {
       setError(message(reason, "Could not load run trace"));
     }
@@ -231,7 +282,7 @@ export function useNemoWorkspace() {
   }
 
   return {
-    serverOnline, sessions, selected, messages, runs, events, trace, models, providers,
+    serverOnline, sessions, selected, messages, liveText, liveReasoning, runs, events, trace, models, providers,
     providerSettings,
     activeRun, approval, workspace, prompt, error, setWorkspace, setPrompt,
     createSession, selectSession, submitPrompt, answerApproval, updateMode, updateModel,

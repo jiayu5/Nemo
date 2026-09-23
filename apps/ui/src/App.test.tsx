@@ -170,6 +170,7 @@ describe("App", () => {
     responses["/api/sessions"] = [];
     delete responses["/api/sessions/session-1/messages"];
     delete responses["/api/sessions/session-1/runs"];
+    delete responses["/api/runs/run-1/trace"];
     runStartResponse = null;
     vi.unstubAllGlobals();
   });
@@ -353,5 +354,158 @@ describe("App", () => {
         }),
       ),
     );
+  });
+
+  it("shows model deltas before the run finishes", async () => {
+    const listeners: Record<string, (event: MessageEvent<string>) => void> = {};
+    vi.stubGlobal("EventSource", class {
+      onerror: (() => void) | null = null;
+      addEventListener(type: string, callback: (event: MessageEvent<string>) => void) {
+        listeners[type] = callback;
+      }
+      close() {}
+    });
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 0,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [];
+    runStartResponse = {
+      run_id: "run-1", session_id: "session-1", status: "queued", max_steps: 10,
+      output: null, error: null, created_at: "2026-09-21T00:00:00Z",
+      started_at: null, finished_at: null, model_selection: null, model_name: null,
+      model_id: null, model_protocol: null, model_provider: null,
+    };
+
+    render(<App />);
+    const input = await screen.findByPlaceholderText("Ask anything");
+    fireEvent.change(input, { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run task" }));
+    await waitFor(() => expect(listeners["model.delta"]).toBeDefined());
+    const delta = { run_id: "run-1", seq: 3, step: 1, type: "model.delta",
+      timestamp: "2026-09-21T00:00:00Z", payload: { text: "Hello from the stream" } };
+    listeners["model.delta"](new MessageEvent("model.delta", { data: JSON.stringify(delta) }));
+    expect(await screen.findByLabelText("Streaming assistant response"))
+      .toHaveTextContent("Hello from the stream");
+    expect(screen.queryByText("model.delta")).not.toBeInTheDocument();
+  });
+
+  it("shows reasoning separately during streaming", async () => {
+    const listeners: Record<string, (event: MessageEvent<string>) => void> = {};
+    vi.stubGlobal("EventSource", class {
+      onerror: (() => void) | null = null;
+      addEventListener(type: string, callback: (event: MessageEvent<string>) => void) {
+        listeners[type] = callback;
+      }
+      close() {}
+    });
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 0,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [];
+    runStartResponse = {
+      run_id: "run-1", session_id: "session-1", status: "queued", max_steps: 10,
+      output: null, error: null, created_at: "2026-09-21T00:00:00Z",
+      started_at: null, finished_at: null, model_selection: null, model_name: null,
+      model_id: null, model_protocol: null, model_provider: null,
+    };
+    render(<App />);
+    fireEvent.change(await screen.findByPlaceholderText("Ask anything"), { target: { value: "Hello" } });
+    fireEvent.click(screen.getByRole("button", { name: "Run task" }));
+    await waitFor(() => expect(listeners["model.reasoning_delta"]).toBeDefined());
+    const reasoning = { run_id: "run-1", seq: 3, step: 1, type: "model.reasoning_delta",
+      timestamp: "2026-09-21T00:00:00Z", payload: { text: "Check facts" } };
+    listeners["model.reasoning_delta"](new MessageEvent("model.reasoning_delta", { data: JSON.stringify(reasoning) }));
+    expect(await screen.findByText("Check facts")).toBeInTheDocument();
+    expect(screen.getByText("Reasoning · generating")).toBeInTheDocument();
+    expect(screen.queryByText("model.reasoning_delta")).not.toBeInTheDocument();
+  });
+
+  it("restores saved reasoning inside the assistant message", async () => {
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 2,
+    }];
+    responses["/api/sessions/session-1/messages"] = [
+      { role: "user", content: "Question", tool_calls: [], tool_result: null },
+      { role: "assistant", content: "Answer", reasoning_content: "Check facts",
+        tool_calls: [], tool_result: null },
+    ];
+    responses["/api/sessions/session-1/runs"] = [];
+    render(<App />);
+    expect(await screen.findByText("Reasoning")).toBeInTheDocument();
+    expect(screen.getByText("Check facts")).toBeInTheDocument();
+    expect(screen.getByText("Answer")).toBeInTheDocument();
+  });
+
+  it("restores a running response after a page reload", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("EventSource", class {
+      onerror: (() => void) | null = null;
+      constructor(url: string) { urls.push(url); }
+      addEventListener() {}
+      close() {}
+    });
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 1,
+    }];
+    responses["/api/sessions/session-1/messages"] = [{
+      role: "user", content: "Say hello", tool_calls: [], tool_result: null,
+    }];
+    responses["/api/sessions/session-1/runs"] = [{
+      run_id: "run-1", session_id: "session-1", status: "running",
+    }];
+    responses["/api/runs/run-1/trace"] = {
+      run: { run_id: "run-1", session_id: "session-1", status: "running" },
+      duration_ms: null, steps: [], model_calls: [], tool_calls: [],
+      events: [{ run_id: "run-1", seq: 7, step: 1, type: "model.delta",
+        timestamp: "2026-09-21T00:00:00Z", payload: { text: "Hello again" } }],
+    };
+
+    render(<App />);
+    expect(await screen.findByLabelText("Streaming assistant response"))
+      .toHaveTextContent("Hello again");
+    expect(urls).toEqual(["/api/runs/run-1/events?after=7"]);
+  });
+
+  it("does not resubscribe when a run finishes during session reload", async () => {
+    const urls: string[] = [];
+    vi.stubGlobal("EventSource", class {
+      onerror: (() => void) | null = null;
+      constructor(url: string) { urls.push(url); }
+      addEventListener() {}
+      close() {}
+    });
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 1,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [{
+      run_id: "run-1", session_id: "session-1", status: "running",
+    }];
+    responses["/api/runs/run-1/trace"] = {
+      run: { run_id: "run-1", session_id: "session-1", status: "completed" },
+      duration_ms: 1, steps: [], model_calls: [], tool_calls: [],
+      events: [{ run_id: "run-1", seq: 3, step: 1, type: "run.completed",
+        timestamp: "2026-09-21T00:00:00Z", payload: {} }],
+    };
+
+    render(<App />);
+    await screen.findByPlaceholderText("Ask anything");
+    await waitFor(() => expect(vi.mocked(fetch).mock.calls.filter(
+      ([path]) => String(path) === "/api/sessions/session-1/messages",
+    )).toHaveLength(2));
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument());
+    expect(urls).toEqual([]);
   });
 });

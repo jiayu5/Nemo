@@ -18,6 +18,8 @@ React UI 通过 Nemo Server 完成 Session/Run 主链，并把审批和 Trace �
 
 `App.tsx` 只组合页面；`hooks/useNemoWorkspace.ts` 管理 Session、Run、SSE 和查询状态；`components/` 分别保存 Session 导航、Conversation、Composer 与 Inspector 视图。API 协议、事件类型和数据类型继续集中维护，避免组件自行发请求。
 
+模型正文通过 `model.delta` 在 Conversation 中逐步显示；Provider 返回的推理通过 `model.reasoning_delta` 在可折叠区域显示。Run 终止后由 Server 保存的历史替换。解析、脱敏、工具调用和断线续读的设计见 [模型流式回复](model-streaming.md)。
+
 ## 3. API 边界
 
 M5a 增加消息、Run 历史、Trace、模型目录、Provider 安全元数据、会话模型切换和显式连接测试。完整路径与 schema 统一维护在 [Server API](../reference/server-api.md)。
@@ -61,4 +63,4 @@ M5c 已按上述边界实现。高级 Alias、Profile、headers 和 parameters �
 
 ## 7. 非目标
 
-当前不做 token delta、语法高亮、多窗口、远程部署认证或 Tauri 打包。桌面进程与本地 API 防护属于 M6。
+当前不做语法高亮、多窗口、远程部署认证或 Tauri 打包。桌面进程与本地 API 防护属于 M6。

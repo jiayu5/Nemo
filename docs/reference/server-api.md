@@ -90,6 +90,8 @@ Content-Type: application/json
 
 `GET /runs/{run_id}/events` 以数据库事件序号作为 SSE `id`，领域事件类型作为 `event`，完整 Event JSON 作为 `data`。
 
+模型流式正文以 `model.delta`、推理以 `model.reasoning_delta` 事件分别传递。两者的 `payload.text` 都是经过脱敏的文本增量，`step` 指向本次模型调用。服务端合并短片段后写入事件表，避免逐字写 SQLite；`model.completed` 随后报告工具调用数量与可用的 token 用量。工具调用参数不随增量发送，必须等模型完整返回并通过校验后才会执行。Run 收敛时仍保存一条完整的助手消息，其中 `reasoning_content` 与 `content` 分开；取消中途已显示的文字也保存在会话历史中。未返回推理的模型不会产生推理事件。
+
 客户端可用以下任一游标续读：
 
 - 查询参数 `?after=<seq>`；
@@ -101,7 +103,7 @@ Content-Type: application/json
 
 - Server 持有活动 Run task、取消信号和待审批请求。
 - SQLite 保存 Session、Messages、Runs、Approvals 和 Events，并物化 Step/Tool Call 查询数据。
-- Run 创建时立即保存脱敏 Prompt；正常收敛时再把本轮完整消息追加到 Session。
+- Run 创建时立即保存脱敏 Prompt；Run 收敛时再把本轮消息追加到 Session，流式取消或失败时可能包含已显示的部分回复。
 - Run 保存实际解析出的 selection、model、protocol 和 provider，避免配置后来变化后失去历史身份。
 - Server 启动时把上次进程遗留的活动 Run 标记为 `interrupted`，不自动重放工具。
 - 密钥不进入 SQLite、API 响应或 Trace。

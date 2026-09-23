@@ -46,6 +46,8 @@ export default function App() {
         <Conversation
           selected={workspace.selected}
           messages={workspace.messages}
+          liveText={workspace.liveText}
+          liveReasoning={workspace.liveReasoning}
           models={workspace.models}
           activeRun={workspace.activeRun}
           approval={workspace.approval}

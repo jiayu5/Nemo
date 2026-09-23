@@ -61,7 +61,7 @@ conda run -n nemo python -m nemo.cli --session <session-id>
 - Nemo 在本机执行，但远程模型会接收发送给 Provider 的上下文。
 - 文件工具限制在 workspace 内；`run_shell` 仍拥有当前用户的系统权限。workspace 和审批都不是操作系统沙箱。
 - Server 默认只监听 `127.0.0.1:18765`，但当前尚未实现桌面端的短期访问凭据与 Origin 防护。
-- 模型 token 增量流式尚未实现；SSE 当前传输的是 Run 领域事件。
+- `openai_compatible` 模型可流式输出正文和 Provider 提供的推理；Server 分别通过 `model.delta`、`model.reasoning_delta` SSE 事件传递增量，UI 单独展示推理。工具调用在完整组装和校验后执行。
 - 不自动重试模型或有副作用的工具；Server 重启会把未完成 Run 标记为 `interrupted`，不会重放。
 - UI 暂不编辑高级 Alias、Profile、静态 headers 或模型 parameters；这些仍可在配置文件中维护，UI 保存时会保留它们。
 

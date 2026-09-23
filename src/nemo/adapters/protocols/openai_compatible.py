@@ -5,10 +5,12 @@ Covers any service that speaks ``POST {base_url}/chat/completions`` with
 """
 
 import json
+from collections.abc import AsyncIterator
 from typing import Any
 
 from pydantic import ValidationError
 
+from nemo.core.context.reminder import REMINDER_CLOSE, REMINDER_OPEN
 from nemo.core.contracts.errors import NemoError, ProviderError, ResponseFormatError
 from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.model_transport import EncodedRequest, HttpResponse
@@ -17,6 +19,8 @@ from nemo.core.contracts.types import (
     Message,
     ModelRequest,
     ModelResponse,
+    ModelReasoningDelta,
+    ModelTextDelta,
     ModelUsage,
     ToolCall,
 )
@@ -31,9 +35,15 @@ class OpenAICompatibleAdapter:
     def encode_request(
         self, request: ModelRequest, resolved: ResolvedModel, secret: SecretValue
     ) -> EncodedRequest:
+        last_user = max((index for index, item in enumerate(request.messages)
+                         if item.role == "user" and not (
+                             item.content.startswith(REMINDER_OPEN)
+                             and item.content.endswith(REMINDER_CLOSE)
+                         )), default=-1)
         body: dict[str, Any] = {
             "model": resolved.model_id,
-            "messages": [_encode_message(message) for message in request.messages],
+            "messages": [_encode_message(message, include_reasoning=index > last_user)
+                         for index, message in enumerate(request.messages)],
         }
         if request.tools:
             body["tools"] = [
@@ -65,13 +75,17 @@ class OpenAICompatibleAdapter:
         content = message.get("content") or ""
         if not isinstance(content, str):
             raise ResponseFormatError("Provider returned non-text message content")
+        reasoning = message.get("reasoning_content") or ""
+        if not isinstance(reasoning, str):
+            raise ResponseFormatError("Provider returned non-text reasoning content")
         raw_calls = message.get("tool_calls") or []
         if not isinstance(raw_calls, list):
             raise ResponseFormatError("Provider returned a malformed tool_calls field")
         calls = tuple(_decode_tool_call(raw) for raw in raw_calls)
         try:
             return ModelResponse(
-                content=content, tool_calls=calls, usage=_decode_usage(response.body)
+                content=content, reasoning_content=reasoning,
+                tool_calls=calls, usage=_decode_usage(response.body)
             )
         except ValidationError:
             raise ResponseFormatError("Provider returned duplicate tool call IDs") from None
@@ -82,8 +96,97 @@ class OpenAICompatibleAdapter:
             f"Provider returned HTTP {response.status}: {secret.redact(detail)}"
         )
 
+    async def decode_stream(
+        self, lines: AsyncIterator[str]
+    ) -> AsyncIterator[ModelTextDelta | ModelReasoningDelta | ModelResponse]:
+        """Assemble chat-completion SSE, validating calls only after all fragments."""
 
-def _encode_message(message: Message) -> dict[str, Any]:
+        content: list[str] = []
+        reasoning: list[str] = []
+        calls: dict[int, dict[str, Any]] = {}
+        usage: ModelUsage | None = None
+        saw_frame = False
+        ended = False
+        async for line in lines:
+            if not line.startswith("data:"):
+                continue
+            data = line[5:].strip()
+            if data == "[DONE]":
+                ended = True
+                break
+            if not data:
+                continue
+            try:
+                frame = json.loads(data)
+            except json.JSONDecodeError:
+                raise ResponseFormatError("Provider returned invalid streaming JSON") from None
+            if not isinstance(frame, dict):
+                raise ResponseFormatError("Provider returned a malformed streaming frame")
+            saw_frame = True
+            frame_usage = _decode_usage(frame)
+            if frame_usage is not None:
+                usage = frame_usage
+            choices = frame.get("choices")
+            if not isinstance(choices, list):
+                raise ResponseFormatError("Provider returned malformed streaming choices")
+            if not choices:
+                continue
+            first = choices[0]
+            if not isinstance(first, dict):
+                raise ResponseFormatError("Provider returned a malformed streaming choice")
+            delta = first.get("delta") or {}
+            if not isinstance(delta, dict):
+                raise ResponseFormatError("Provider returned a malformed streaming delta")
+            fragment = delta.get("content")
+            reasoning_fragment = delta.get("reasoning_content")
+            if reasoning_fragment is not None:
+                if not isinstance(reasoning_fragment, str):
+                    raise ResponseFormatError("Provider returned non-text streaming reasoning")
+                if reasoning_fragment:
+                    reasoning.append(reasoning_fragment)
+                    yield ModelReasoningDelta(text=reasoning_fragment)
+            if fragment is not None:
+                if not isinstance(fragment, str):
+                    raise ResponseFormatError("Provider returned non-text streaming content")
+                if fragment:
+                    content.append(fragment)
+                    yield ModelTextDelta(text=fragment)
+            raw_calls = delta.get("tool_calls") or []
+            if not isinstance(raw_calls, list):
+                raise ResponseFormatError("Provider returned malformed streaming tool calls")
+            for raw in raw_calls:
+                if (not isinstance(raw, dict) or isinstance(raw.get("index"), bool)
+                        or not isinstance(raw.get("index"), int)):
+                    raise ResponseFormatError("Provider returned a tool call without an index")
+                index = raw["index"]
+                if index < 0:
+                    raise ResponseFormatError("Provider returned a negative tool call index")
+                call = calls.setdefault(index, {"id": "", "function": {"name": "", "arguments": ""}})
+                call_id = raw.get("id")
+                if call_id is not None:
+                    if not isinstance(call_id, str):
+                        raise ResponseFormatError("Provider returned malformed tool call id")
+                    call["id"] += call_id
+                function = raw.get("function") or {}
+                if not isinstance(function, dict):
+                    raise ResponseFormatError("Provider returned malformed tool call function")
+                for key in ("name", "arguments"):
+                    piece = function.get(key)
+                    if piece is not None:
+                        if not isinstance(piece, str):
+                            raise ResponseFormatError("Provider returned non-text tool call fragment")
+                        call["function"][key] += piece
+        if not saw_frame or not ended:
+            raise ResponseFormatError("Provider streaming response ended before [DONE]")
+        decoded_calls = tuple(_decode_tool_call(calls[index]) for index in sorted(calls))
+        try:
+            yield ModelResponse(content="".join(content), reasoning_content="".join(reasoning),
+                                tool_calls=decoded_calls, usage=usage)
+        except ValidationError:
+            raise ResponseFormatError("Provider returned duplicate tool call IDs") from None
+
+
+def _encode_message(message: Message, *, include_reasoning: bool = True) -> dict[str, Any]:
     if message.role == "tool":
         result = message.tool_result
         payload: Any = (
@@ -97,7 +200,7 @@ def _encode_message(message: Message) -> dict[str, Any]:
             "content": payload if isinstance(payload, str) else _dumps(payload),
         }
     if message.tool_calls:
-        return {
+        encoded = {
             "role": "assistant",
             # Providers expect null, not an empty string, next to tool calls.
             "content": message.content or None,
@@ -110,7 +213,13 @@ def _encode_message(message: Message) -> dict[str, Any]:
                 for call in message.tool_calls
             ],
         }
-    return {"role": message.role, "content": message.content}
+        if include_reasoning and message.reasoning_content:
+            encoded["reasoning_content"] = message.reasoning_content
+        return encoded
+    encoded = {"role": message.role, "content": message.content}
+    if include_reasoning and message.reasoning_content:
+        encoded["reasoning_content"] = message.reasoning_content
+    return encoded
 
 
 def _decode_tool_call(raw: Any) -> ToolCall:

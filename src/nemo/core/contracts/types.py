@@ -31,11 +31,14 @@ class ToolResult(Contract):
 class Message(Contract):
     role: Literal["system", "user", "assistant", "tool"]
     content: str = ""
+    reasoning_content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     tool_result: ToolResult | None = None
 
     @model_validator(mode="after")
     def validate_role(self):
+        if self.reasoning_content and self.role != "assistant":
+            raise ValueError("Only assistant messages may contain reasoning content")
         if self.tool_calls and self.role != "assistant":
             raise ValueError("Only assistant messages may contain tool calls")
         if (self.role == "tool") != (self.tool_result is not None):
@@ -77,6 +80,7 @@ class ModelUsage(Contract):
 
 class ModelResponse(Contract):
     content: str = ""
+    reasoning_content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     usage: ModelUsage | None = None
 
@@ -86,6 +90,18 @@ class ModelResponse(Contract):
         if len(ids) != len(set(ids)):
             raise ValueError("Duplicate tool call IDs")
         return self
+
+
+class ModelTextDelta(Contract):
+    """A provider-neutral increment of assistant text, before the final response."""
+
+    text: str = Field(min_length=1)
+
+
+class ModelReasoningDelta(Contract):
+    """A provider-neutral increment of assistant reasoning, separate from answer text."""
+
+    text: str = Field(min_length=1)
 
 
 class Model(Protocol):

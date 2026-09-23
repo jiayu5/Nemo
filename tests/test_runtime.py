@@ -1,7 +1,7 @@
 import asyncio
 import unittest
 
-from nemo.core.contracts.types import Message, ModelResponse, RunStatus, ToolCall
+from nemo.core.contracts.types import Message, ModelReasoningDelta, ModelResponse, ModelTextDelta, RunStatus, ToolCall
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.tools.registry import ToolRegistry
 from nemo.testing.fakes import AddTool, AdditionModel, FakeModel
@@ -74,6 +74,66 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
     async def test_model_error(self):
         result = await AgentRuntime(FakeModel([]), ToolRegistry()).run("task")
         self.assert_terminal(result, RunStatus.FAILED)
+
+    async def test_streamed_text_precedes_final_message(self):
+        class StreamingModel:
+            async def stream(self, request):
+                yield ModelTextDelta(text="Hel")
+                yield ModelTextDelta(text="lo")
+                yield ModelResponse(content="Hello")
+
+        result = await AgentRuntime(StreamingModel(), ToolRegistry()).run("task")
+        self.assertEqual(result.state.output, "Hello")
+        self.assertEqual(
+            [event.payload["text"] for event in result.events if event.type == "model.delta"],
+            ["Hel", "lo"],
+        )
+        self.assertEqual(result.state.messages[-1].content, "Hello")
+
+    async def test_reasoning_uses_separate_event_and_message_field(self):
+        class StreamingModel:
+            async def stream(self, request):
+                yield ModelReasoningDelta(text="Check the facts")
+                yield ModelTextDelta(text="Answer")
+                yield ModelResponse(content="Answer", reasoning_content="Check the facts")
+
+        result = await AgentRuntime(StreamingModel(), ToolRegistry()).run("task")
+        self.assertEqual([e.payload["text"] for e in result.events
+                          if e.type == "model.reasoning_delta"], ["Check the facts"])
+        self.assertEqual(result.state.messages[-1].reasoning_content, "Check the facts")
+        self.assertEqual(result.state.output, "Answer")
+
+    async def test_cancelled_stream_keeps_visible_partial_text(self):
+        entered = asyncio.Event()
+        cancel = asyncio.Event()
+
+        class StreamingModel:
+            async def stream(self, request):
+                yield ModelTextDelta(text="Partial reply")
+                entered.set()
+                await asyncio.Event().wait()
+
+        task = asyncio.create_task(
+            AgentRuntime(StreamingModel(), ToolRegistry()).run("task", cancel=cancel)
+        )
+        await asyncio.wait_for(entered.wait(), 1)
+        cancel.set()
+        result = await asyncio.wait_for(task, 1)
+        self.assertEqual(result.state.status, RunStatus.CANCELLED)
+        self.assertEqual(result.state.output, "Partial reply")
+        self.assertEqual(result.state.messages[-1].content, "Partial reply")
+
+    async def test_failed_stream_keeps_visible_partial_text(self):
+        class StreamingModel:
+            async def stream(self, request):
+                yield ModelTextDelta(text="Partial reply")
+                raise ValueError("provider disconnected")
+
+        result = await AgentRuntime(StreamingModel(), ToolRegistry()).run("task")
+        self.assertEqual(result.state.status, RunStatus.FAILED)
+        self.assertEqual(result.state.output, "Partial reply")
+        self.assertEqual(result.state.messages[-1].content, "Partial reply")
+        self.assertEqual(result.state.error, "Runtime execution failed")
 
     async def test_cancel_before_start(self):
         cancel = asyncio.Event()

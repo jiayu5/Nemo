@@ -15,6 +15,8 @@ import { Composer } from "./Composer";
 interface Props {
   selected: Session | null;
   messages: Message[];
+  liveText: string;
+  liveReasoning: string;
   models: ModelOption[];
   activeRun: Run | null;
   approval: ApprovalRequest | null;
@@ -28,14 +30,14 @@ interface Props {
 }
 
 export function Conversation({
-  selected, messages, models, activeRun, approval, prompt, onPromptChange, onSubmit,
+  selected, messages, liveText, liveReasoning, models, activeRun, approval, prompt, onPromptChange, onSubmit,
   onStop, onApproval, onModeChange, onModelChange,
 }: Props) {
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages]);
+  }, [messages, liveText, liveReasoning]);
 
   return (
     <section className="conversation-panel panel">
@@ -51,6 +53,12 @@ export function Conversation({
         {messages.map((message, index) => (
           <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
             <span className="role">{message.role}</span>
+            {message.role === "assistant" && message.reasoning_content && (
+              <details className="reasoning-block">
+                <summary>Reasoning</summary>
+                <div className="reasoning-content">{message.reasoning_content}</div>
+              </details>
+            )}
             {message.role === "tool" ? (
               <pre>{JSON.stringify(message.tool_result, null, 2)}</pre>
             ) : (
@@ -65,6 +73,18 @@ export function Conversation({
             )}
           </article>
         ))}
+        {(liveText || liveReasoning) && (
+          <article className="message assistant" aria-label="Streaming assistant response">
+            <span className="role">assistant</span>
+            {liveReasoning && (
+              <details className="reasoning-block" open={!liveText}>
+                <summary>Reasoning · generating</summary>
+                <div className="reasoning-content">{liveReasoning}</div>
+              </details>
+            )}
+            {liveText && <div className="message-content"><Markdown remarkPlugins={[remarkGfm]}>{liveText}</Markdown></div>}
+          </article>
+        )}
         {!messages.length && selected && (
           <div className="conversation-empty">
             <div className="empty-orb"><span>N</span></div>
