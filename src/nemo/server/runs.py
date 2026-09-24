@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from nemo.config.loader import load_config
 from nemo.core.context.builder import ContextBuilder
+from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
 from nemo.core.contracts.events import EventType
 from nemo.core.contracts.errors import NemoError
 from nemo.core.contracts.tools import ExecutionContext
@@ -204,6 +205,11 @@ class RunManager:
                     user_instructions=session["user_instructions"],
                     project_instructions=session["project_instructions"],
                 ),
+                context_window=(
+                    ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
+                    if resolved is not None and resolved.context_window_tokens is not None else None
+                ),
+                checkpoint=self._checkpoint(session["session_id"]),
             )
 
             def persist(event: Event) -> None:
@@ -238,6 +244,19 @@ class RunManager:
                         await closer()
                     except Exception:
                         pass
+
+    def _checkpoint(self, session_id: str) -> CompactionCheckpoint | None:
+        payload = self.repository.latest_compaction(session_id)
+        if not payload:
+            return None
+        try:
+            return CompactionCheckpoint(
+                covered_messages=int(payload["covered_messages"]),
+                history_digest=str(payload["history_digest"]),
+                summary=str(payload["summary"]),
+            )
+        except (KeyError, TypeError, ValueError):
+            return None
 
     def _approver(self, run_id: str):
         async def approve(request: ApprovalRequest) -> ApprovalOutcome:

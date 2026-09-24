@@ -18,6 +18,8 @@ const blankDraft: ProviderSettingsDraft = {
   timeout_seconds: 60,
   model_name: "",
   model_id: "",
+  context_window_tokens: null,
+  response_reserve_tokens: 2048,
   tool_calling: true,
   make_default: true,
   api_key: { action: "replace", value: "" },
@@ -38,6 +40,8 @@ function draftFor(provider: SettingsProvider, modelIndex = 0): ProviderSettingsD
     timeout_seconds: provider.timeout_seconds,
     model_name: model?.model_name ?? "",
     model_id: model?.model_id ?? "",
+    context_window_tokens: model?.context_window_tokens ?? null,
+    response_reserve_tokens: model?.response_reserve_tokens ?? 2048,
     tool_calling: model?.capabilities.includes("tool_calling") ?? true,
     make_default: model?.is_default ?? false,
     api_key: { action: "keep" },
@@ -105,6 +109,8 @@ export function ProviderSettingsPanel({ settings, onSaved }: Props) {
       ...current,
       model_name: "",
       model_id: "",
+      context_window_tokens: null,
+      response_reserve_tokens: 2048,
       tool_calling: true,
       make_default: false,
       api_key: { action: "keep" },
@@ -386,6 +392,21 @@ export function ProviderSettingsPanel({ settings, onSaved }: Props) {
             <label className="settings-check">
               <input type="checkbox" checked={draft.make_default} onChange={(event) => update("make_default", event.target.checked)} />
               <span><b>Default model</b><small>Preselect this model for new sessions.</small></span>
+            </label>
+          </div>
+          <div className="settings-row">
+            <label>
+              Context window (tokens)
+              <input type="number" min="1024" value={draft.context_window_tokens ?? ""}
+                onChange={(event) => update("context_window_tokens", event.target.value ? Number(event.target.value) : null)}
+                placeholder="Set from model documentation" />
+              <small>Enables automatic conversation compression. Leave blank if unknown.</small>
+            </label>
+            <label>
+              Response reserve (tokens)
+              <input type="number" min="1" value={draft.response_reserve_tokens}
+                onChange={(event) => update("response_reserve_tokens", Number(event.target.value))} />
+              <small>Space kept for the model response. Compression may make extra API calls.</small>
             </label>
           </div>
         </fieldset>

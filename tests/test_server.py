@@ -14,6 +14,7 @@ from nemo.config.editor import ConfigEditor
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.model_config import AppConfig
+from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import ModelResponse, ModelTextDelta, ToolCall
 from nemo.core.models.registry import ModelRegistry
 from nemo.core.models.resolver import ModelResolver
@@ -79,6 +80,50 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 return run
             await asyncio.sleep(0.01)
         self.fail("run did not finish")
+
+    async def test_compaction_checkpoint_is_reused_across_server_runs(self):
+        config = self.config()
+        model_config = config.models["demo-model"].model_copy(
+            update={"context_window_tokens": 12000, "response_reserve_tokens": 2048}
+        )
+        config = config.model_copy(update={"models": {"demo-model": model_config}})
+        model = FakeModel([
+            ModelResponse(content="Acknowledged."),
+            ModelResponse(content="Old request was about A."),
+            ModelResponse(content="Second answer."),
+            ModelResponse(content="Third answer."),
+        ])
+        model.resolved = ModelResolver(ModelRegistry(config)).resolve()
+        service = NemoApplication(
+            SQLiteRepository(self.root / "compaction.sqlite"),
+            client_factory=lambda **_: model,
+            config_loader=lambda: config,
+        )
+        self.services.append(service)
+        session = service.repository.create_session(
+            session_id="compaction-session", workspace=self.root, model=None,
+            approval_mode=ApprovalMode.FULL.value,
+            user_instructions=None, project_instructions=None,
+        )
+        first = service.start_run(session["session_id"], prompt="A" * 5800, max_steps=1)
+        first_result = await self.wait_terminal(service, first["run_id"])
+        self.assertEqual(first_result["status"], "completed", first_result.get("error"))
+        second = service.start_run(session["session_id"], prompt="B" * 900, max_steps=1)
+        self.assertEqual((await self.wait_terminal(service, second["run_id"]))["status"], "completed")
+        events = service.events_after(second["run_id"], 0)
+        self.assertIn(EventType.CONTEXT_COMPACTED, [event.type for event in events])
+        checkpoint = service.repository.latest_compaction(session["session_id"])
+        self.assertEqual(checkpoint["covered_messages"], 2)
+        self.assertIn("Old request was about A.", checkpoint["summary"])
+        third = service.start_run(session["session_id"], prompt="Next", max_steps=1)
+        self.assertEqual((await self.wait_terminal(service, third["run_id"]))["status"], "completed")
+        self.assertNotIn(
+            EventType.CONTEXT_COMPACTED,
+            [event.type for event in service.events_after(third["run_id"], 0)],
+        )
+        self.assertEqual(len(model.requests), 4)
+        self.assertIn("Old request was about A.", model.requests[-1].messages[1].content)
+        self.assertEqual(len(service.session_messages(session["session_id"])), 6)
 
     async def test_http_session_run_and_sse_reconnect(self):
         service, _ = self.service([ModelResponse(content="done")])
@@ -404,6 +449,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             "timeout_seconds": 45,
             "model_name": "demo-model",
             "model_id": "demo-v1",
+            "context_window_tokens": 8192,
+            "response_reserve_tokens": 1024,
             "tool_calling": True,
             "make_default": True,
             "api_key": {"action": "replace", "value": "private-key-value"},
@@ -436,6 +483,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(provider["api_key_source"], "file")
                 self.assertEqual(provider["proxy_source"], "file")
                 self.assertEqual(provider["models"][0]["model_id"], "demo-v1")
+                self.assertEqual(provider["models"][0]["context_window_tokens"], 8192)
+                self.assertEqual(load_config(config_path).models["demo-model"].response_reserve_tokens, 1024)
 
                 providers = (await client.get("/providers")).json()
                 models = (await client.get("/models")).json()

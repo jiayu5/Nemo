@@ -48,6 +48,8 @@ class ModelResolver:
             api_key_env=provider.api_key_env,
             proxy_env=provider.proxy_env,
             capabilities=model.capabilities,
+            context_window_tokens=model.context_window_tokens,
+            response_reserve_tokens=model.response_reserve_tokens,
             parameters=parameters,
             headers=dict(provider.headers),
             timeout_seconds=provider.timeout_seconds,

@@ -71,6 +71,12 @@ class SettingsService:
             raise ConfigError("proxy action requires proxy_env")
         if request.proxy_env == request.api_key_env:
             raise ConfigError("proxy_env and api_key_env must use different variables")
+        current = self.editor.load_optional()
+        previous = current.models.get(request.model_name) if current else None
+        window = (request.context_window_tokens if "context_window_tokens" in request.model_fields_set
+                  else previous.context_window_tokens if previous else None)
+        reserve = (request.response_reserve_tokens if "response_reserve_tokens" in request.model_fields_set
+                   else previous.response_reserve_tokens if previous else 2048)
         try:
             provider = ProviderConfig(
                 protocol=request.protocol,
@@ -82,6 +88,8 @@ class SettingsService:
             model = ModelConfig(
                 provider=provider_id,
                 model_id=request.model_id,
+                context_window_tokens=window,
+                response_reserve_tokens=reserve,
                 capabilities=(
                     frozenset({"tool_calling"})
                     if request.tool_calling
@@ -121,6 +129,8 @@ class SettingsService:
                 {
                     "model_name": name,
                     "model_id": model.model_id,
+                    "context_window_tokens": model.context_window_tokens,
+                    "response_reserve_tokens": model.response_reserve_tokens,
                     "capabilities": sorted(model.capabilities),
                     "is_default": self._is_default_model(config, name),
                 }

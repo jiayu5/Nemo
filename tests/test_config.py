@@ -52,6 +52,18 @@ class ConfigTestCase(unittest.TestCase):
 
 
 class LoaderTests(ConfigTestCase):
+    def test_context_window_round_trips_and_reserve_is_validated(self):
+        source = VALID_CONFIG.replace(
+            'capabilities = ["tool_calling"]',
+            'capabilities = ["tool_calling"]\ncontext_window_tokens = 8192\nresponse_reserve_tokens = 1024',
+        )
+        config = load_config(self.write(source))
+        self.assertEqual(config.models["chat-model"].context_window_tokens, 8192)
+        self.assertIn("context_window_tokens = 8192", render_toml(config))
+        bad = source.replace("response_reserve_tokens = 1024", "response_reserve_tokens = 8192")
+        with self.assertRaises(ConfigError):
+            load_config(self.write(bad))
+
     def test_valid_config_loads_and_normalizes(self):
         config = load_config(self.write(VALID_CONFIG))
         self.assertEqual(config.default, "chat")

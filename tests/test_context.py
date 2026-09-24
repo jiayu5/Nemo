@@ -7,6 +7,10 @@ from nemo.core.context.builder import (
     USER_INSTRUCTIONS_HEADER,
     ContextBuilder,
 )
+from nemo.core.context.compaction import (
+    CompactionCheckpoint, ContextEngine, ContextOverflowError, ContextWindow,
+    estimate_request_tokens,
+)
 from nemo.core.context.reminder import (
     MAX_REMINDER_CHARS,
     Reminder,
@@ -27,6 +31,67 @@ def tool_turn(call_id):
     return ModelResponse(
         tool_calls=(ToolCall(id=call_id, name="add", arguments={"a": 1, "b": 2}),)
     )
+
+
+class CompactionTests(unittest.IsolatedAsyncioTestCase):
+    def setUp(self):
+        self.tools = ToolRegistry()
+        self.builder = ContextBuilder(system_prompt="Follow the user request.")
+        self.old = Message(role="user", content="Earlier detail: " + "A" * 2000)
+        self.answer = Message(role="assistant", content="Acknowledged.")
+        self.current = Message(role="user", content="Current question: " + "B" * 650)
+
+    async def test_compresses_old_turn_and_keeps_current_text(self):
+        model = FakeModel([ModelResponse(content="Earlier detail was A.")])
+        engine = ContextEngine(self.builder, model, ContextWindow(4096, 1024))
+        state = AgentState(messages=[self.old, self.answer, self.current])
+        request, checkpoints = await engine.build(state, self.tools)
+        self.assertEqual(len(model.requests), 1)
+        self.assertEqual(model.requests[0].tools, ())
+        self.assertEqual(len(checkpoints), 1)
+        self.assertEqual(checkpoints[0].covered_messages, 2)
+        self.assertIn("Earlier detail was A.", request.messages[1].content)
+        self.assertEqual(request.messages[-1], self.current)
+        self.assertEqual(state.messages, [self.old, self.answer, self.current])
+        self.assertLessEqual(estimate_request_tokens(request), 3072)
+
+    async def test_reuses_matching_checkpoint_without_another_model_call(self):
+        first = FakeModel([ModelResponse(content="Earlier detail was A.")])
+        state = AgentState(messages=[self.old, self.answer, self.current])
+        _, checkpoints = await ContextEngine(self.builder, first, ContextWindow(4096, 1024)).build(state, self.tools)
+        second = FakeModel([])
+        request, created = await ContextEngine(
+            self.builder, second, ContextWindow(4096, 1024), checkpoints[0]
+        ).build(state, self.tools)
+        self.assertEqual(created, ())
+        self.assertEqual(second.requests, [])
+        self.assertIn("Earlier detail was A.", request.messages[1].content)
+        stale = CompactionCheckpoint(2, "wrong", "stale summary")
+        third = FakeModel([ModelResponse(content="Fresh summary")])
+        _, created = await ContextEngine(
+            self.builder, third, ContextWindow(4096, 1024), stale
+        ).build(state, self.tools)
+        self.assertEqual(created[0].summary, "Fresh summary")
+
+    async def test_uncompressible_current_turn_fails_without_dropping_it(self):
+        model = FakeModel([])
+        engine = ContextEngine(self.builder, model, ContextWindow(4096, 1024))
+        with self.assertRaises(ContextOverflowError):
+            await engine.build(AgentState(messages=[Message(role="user", content="X" * 4000)]), self.tools)
+        self.assertEqual(model.requests, [])
+
+    async def test_runtime_emits_summary_and_preserves_full_history(self):
+        model = FakeModel([
+            ModelResponse(content="Earlier detail was A."),
+            ModelResponse(content="Done"),
+        ])
+        runtime = AgentRuntime(model, self.tools, self.builder,
+                               context_window=ContextWindow(4096, 1024))
+        result = await runtime.run(self.current.content, history=(self.old, self.answer))
+        self.assertEqual(result.state.status, RunStatus.COMPLETED)
+        self.assertEqual(result.state.messages[:2], [self.old, self.answer])
+        self.assertIn("context.compacted", [event.type for event in result.events])
+        self.assertEqual(len(model.requests), 2)
 
 
 class ReminderTests(unittest.TestCase):

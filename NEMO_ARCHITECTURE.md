@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 / M1–M6 已完成；桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
+> 当前状态：Phase 1 / M1–M6 已完成；Phase 2 / M7 上下文窗口与压缩已实现。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -71,7 +71,7 @@ flowchart TB
 | Contracts | `core/contracts/` | Pydantic 数据、Protocol、错误语义 | I/O、厂商装配 |
 | Runtime | `core/runtime/` | Agent Loop、状态、步数、终态、取消 | HTTP、SQLite、终端交互 |
 | Session | `core/session.py` | 会话标识、消息和 workspace 状态 | 文件或数据库 I/O |
-| Context | `core/context/`、`prompts/` | 稳定系统前缀、历史、工具 schema、Reminder | 长期 Memory |
+| Context | `core/context/`、`prompts/` | 稳定系统前缀、历史、工具 schema、Reminder、上下文窗口与压缩 | 检索与长期 Memory |
 | Model | `core/models/` | Registry、Resolver、统一 Model Client | 厂商判断、密钥持久化 |
 | Tool Core | `core/tools/` | 注册、参数校验、审批策略、路径与输出约束 | 具体文件或进程 I/O |
 | Adapters | `adapters/` | 协议、HTTP、持久化、Filesystem、Shell、Web | Agent Loop |
@@ -153,6 +153,8 @@ Runtime 在流式增量结束后仍取得完整 `ModelResponse`，用它完成�
 
 Reminder 只添加到当前请求，不写入 Session，避免随历史累积或破坏稳定前缀。当前只读取 workspace 根部的项目说明；向仓库根逐层收集是待办 T1。
 
+M7 加入可选的模型上下文窗口。超过输入规划量时，Context Engine 调用当前模型压缩较早的完整对话轮次，并把摘要与近期原文送入正常模型请求；原始会话历史保持追加式。压缩检查点保存在现有 Run 事件或直连 CLI transcript 中，复用前校验原始历史。估算值不代表精确 token 数或账户余额，压缩也会产生额外模型调用。详细规则见 [Context 组装设计](docs/design/context-assembly.md#8-m7-上下文窗口与压缩)。
+
 ### Tool
 
 当前工具：
@@ -193,6 +195,7 @@ flowchart LR
 
 - **Phase 1**：完成单 Agent 的可运行、可观察客户端闭环。
 - **Phase 2**：将基础 Context Builder 演进为带预算、检索和压缩的 Context Engine，并加入分层 Memory。
+- **M7 已交付**：上下文窗口规划和会话压缩；检索与长期 Memory 留待后续里程碑。
 - **Phase 3**：加入 Orchestrator、Subagents、Skills、MCP、Sandbox、Planning、Automation 和完整 Permission Engine。
 
 Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具集合和预算；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
@@ -207,6 +210,7 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M4 · Context、CLI、Server | 已完成 | 稳定上下文、Session、审批、SQLite、HTTP/SSE |
 | M5 · React UI | 已完成 | 查询 API、React UI、Provider Settings 与安全配置写入 |
 | M6 · macOS App | 已完成 | Tauri、Python sidecar、共享历史与 Run 属主协调、访问保护和 `onedir` 打包 |
+| M7 · Context Window & Compaction | 已完成 | 模型窗口配置、旧轮次压缩、摘要恢复与额外调用事件 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

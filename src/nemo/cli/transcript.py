@@ -23,10 +23,12 @@ from typing import Any
 from pydantic import ValidationError
 
 from nemo.core.contracts.types import Message
+from nemo.core.context.compaction import CompactionCheckpoint
 from nemo.redaction import redact
 
 HEADER_TYPE = "session"
 MESSAGE_TYPE = "message"
+COMPACTION_TYPE = "context_compaction"
 
 
 @dataclass(frozen=True)
@@ -56,6 +58,7 @@ class LoadedTranscript:
     #: Lines that could not be read: a torn write from a killed process, an
     #: unknown record type, or a payload that no longer validates.
     unreadable: int = 0
+    checkpoint: CompactionCheckpoint | None = None
 
 
 def _open_append(path: Path) -> Any:
@@ -104,6 +107,19 @@ def append_messages(path: Path, messages: Iterable[Message]) -> int:
     return redacted
 
 
+def append_compaction(path: Path, checkpoint: CompactionCheckpoint) -> None:
+    payload, _ = _redact_tree({
+        "type": COMPACTION_TYPE,
+        "covered_messages": checkpoint.covered_messages,
+        "history_digest": checkpoint.history_digest,
+        "summary": checkpoint.summary,
+    })
+    with _open_append(path) as handle:
+        handle.write(json.dumps(payload, ensure_ascii=False) + "\n")
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
 def load_transcript(path: Path) -> LoadedTranscript:
     """Read what is readable.
 
@@ -117,6 +133,7 @@ def load_transcript(path: Path) -> LoadedTranscript:
     messages: list[Message] = []
     redacted = 0
     unreadable = 0
+    checkpoint: CompactionCheckpoint | None = None
     for line in path.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -135,12 +152,19 @@ def load_transcript(path: Path) -> LoadedTranscript:
                 messages.append(Message.model_validate(record["message"]))
                 if record.get("redacted"):
                     redacted += 1
+            elif kind == COMPACTION_TYPE:
+                checkpoint = CompactionCheckpoint(
+                    covered_messages=int(record["covered_messages"]),
+                    history_digest=str(record["history_digest"]),
+                    summary=str(record["summary"]),
+                )
             else:
                 unreadable += 1
-        except (json.JSONDecodeError, KeyError, TypeError, ValidationError):
+        except (json.JSONDecodeError, KeyError, TypeError, ValueError, ValidationError):
             unreadable += 1
     return LoadedTranscript(
-        header=header, messages=tuple(messages), redacted=redacted, unreadable=unreadable
+        header=header, messages=tuple(messages), redacted=redacted, unreadable=unreadable,
+        checkpoint=checkpoint,
     )
 
 

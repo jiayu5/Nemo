@@ -1,12 +1,12 @@
 # Context 组装设计
 
-> 状态：M4a/M4d 已实现；向上查找项目说明仍是 TODO T1。
+> 状态：M4a/M4d 与 M7 上下文压缩已实现；向上查找项目说明仍是 TODO T1。
 
 ## 1. 目标与边界
 
 Context Builder 负责决定一次模型调用实际收到哪些消息，同时保证稳定前缀可缓存、Session 历史不被修改、临时运行信息不累积。
 
-它不负责读取文件、长期 Memory、检索、压缩或 token 预算优化。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
+`ContextBuilder` 仍只负责稳定前缀、历史和 Reminder 的组装。M7 的 `ContextEngine` 在外层选择历史并按需压缩；它不读取文件、不提供长期 Memory 或检索。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
 
 ## 2. 三层 Context
 
@@ -62,4 +62,12 @@ Reminder 是追加在历史之后的独立 user 消息，遵守三条规则：
 
 ## 7. 后续
 
-T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。Phase 2 再加入 Context Budget、检索、压缩与 Memory；这些能力不改变客户端或 Runtime 获取统一 message 列表的接口。
+T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。检索与长期 Memory 仍属 Phase 2 后续工作。
+
+## 8. M7 上下文窗口与压缩
+
+模型可选配置 `context_window_tokens` 和 `response_reserve_tokens`。未配置窗口时沿用 M4 的完整历史组装；配置后，`ContextEngine` 以 UTF-8 JSON 字节数加固定消息开销保守估算输入大小，再减去回复预留量。这个值用于提前规划请求，**不是 Provider 的精确 token 计数、API 余额或费用上限**。Provider 仍可能因自身计数规则拒绝请求。
+
+超出窗口时，Engine 把最早的完整对话轮次交给当前模型生成摘要；近期用户请求及其后的工具调用链保留原文。摘要作为标明来源的临时 assistant 消息插入稳定前缀之后，原始 Session 消息不改写，也不获得 system 指令的优先级。压缩请求不提供工具；单次摘要限制为 1200 UTF-8 字节。若较早的单轮内容本身装不进压缩请求、当前轮本身超限、压缩失败或摘要不能缩小请求，本轮明确失败，不静默裁剪历史。
+
+每次压缩生成 `covered_messages`、前缀 SHA-256 校验值和摘要。Server 将脱敏后的检查点保存在现有 Run 事件中，直连 CLI 将其保存在 JSONL transcript 中；恢复时只复用与当前原始历史匹配的检查点。`context.compression_started`、`context.compression_completed` 记录额外模型调用及可用的 token 用量，`context.compacted` 记录可核查摘要。压缩会增加 Provider 调用，可能产生费用。

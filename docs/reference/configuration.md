@@ -28,6 +28,8 @@ timeout_seconds = 60
 provider = "example"
 model_id = "example-chat"
 capabilities = ["tool_calling"]
+context_window_tokens = 8192
+response_reserve_tokens = 2048
 
 [models.example-chat.parameters]
 temperature = 0.2
@@ -75,9 +77,13 @@ chmod 600 ~/.nemo/.env
 | `provider` | 是 | 必须引用已定义 Provider |
 | `model_id` | 是 | 发送给远端 API 的模型名称 |
 | `capabilities` | 否 | 当前包括 `tool_calling`、`streaming`；声明能力不代表 adapter 已实现它 |
+| `context_window_tokens` | 否 | 模型上下文窗口；设置后启用压缩，最小 1024；应以所用模型的官方值为准 |
+| `response_reserve_tokens` | 否 | 为回复预留的容量，默认 2048，必须小于已设置的窗口 |
 | `parameters` | 否 | 透传给协议 adapter 的模型参数 |
 
 `model`、`messages`、`tools`、`stream` 由 adapter 管理，不允许出现在 `parameters`。
+
+窗口配置控制一次模型请求的上下文大小，不表示 Nemo 能读取 API 账户余额。Nemo 使用保守的本地字节估算；摘要由所选模型额外生成，可能产生费用。未配置 `context_window_tokens` 时不触发自动压缩。具体组装与失败规则见 [Context 设计](../design/context-assembly.md#8-m7-上下文窗口与压缩)。
 
 ### Alias、Profile 与 Default
 

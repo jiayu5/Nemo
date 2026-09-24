@@ -228,6 +228,10 @@ def render_toml(config: AppConfig) -> str:
         )
         if model.capabilities:
             lines.append(f"capabilities = {_toml_value(sorted(model.capabilities))}")
+        if model.context_window_tokens is not None:
+            lines.append(f"context_window_tokens = {model.context_window_tokens}")
+        if model.response_reserve_tokens != 2048:
+            lines.append(f"response_reserve_tokens = {model.response_reserve_tokens}")
         lines.append("")
         if model.parameters:
             lines.append(f"[models.{_toml_key(name)}.parameters]")

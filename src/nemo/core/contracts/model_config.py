@@ -6,7 +6,7 @@ the stable contract between configuration and adapters.
 
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, StringConstraints, field_validator
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from nemo.core.contracts.types import Contract
 
@@ -45,7 +45,15 @@ class ModelConfig(Contract):
     provider: NonEmptyStr
     model_id: NonEmptyStr
     capabilities: frozenset[Capability] = frozenset()
+    context_window_tokens: int | None = Field(default=None, ge=1024)
+    response_reserve_tokens: int = Field(default=2048, ge=1)
     parameters: dict[str, Any] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def reserve_fits_window(self):
+        if self.context_window_tokens is not None and self.response_reserve_tokens >= self.context_window_tokens:
+            raise ValueError("response_reserve_tokens must be smaller than context_window_tokens")
+        return self
 
 
 class ProfileConfig(Contract):
@@ -79,6 +87,8 @@ class ResolvedModel(Contract):
     api_key_env: str
     proxy_env: str | None = None
     capabilities: frozenset[Capability] = frozenset()
+    context_window_tokens: int | None = None
+    response_reserve_tokens: int = 2048
     parameters: dict[str, Any] = Field(default_factory=dict)
     headers: dict[str, str] = Field(default_factory=dict)
     timeout_seconds: float = 60.0

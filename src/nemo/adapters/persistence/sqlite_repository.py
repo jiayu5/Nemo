@@ -202,6 +202,18 @@ class SQLiteRepository:
             ).fetchall()
         return tuple(Message.model_validate_json(row["message_json"]) for row in rows)
 
+    def latest_compaction(self, session_id: str) -> dict[str, Any] | None:
+        with self._lock:
+            row = self._connection.execute(
+                """SELECT events.payload_json FROM events
+                   JOIN runs ON runs.run_id = events.run_id
+                   WHERE runs.session_id = ? AND events.type = ?
+                   ORDER BY events.timestamp DESC, events.run_id DESC, events.seq DESC
+                   LIMIT 1""",
+                (session_id, EventType.CONTEXT_COMPACTED.value),
+            ).fetchone()
+        return json.loads(row["payload_json"]) if row is not None else None
+
     def create_run(
         self, *, run_id: str, session_id: str, prompt: str, max_steps: int
     ) -> dict[str, Any]:

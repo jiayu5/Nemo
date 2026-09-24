@@ -4,6 +4,7 @@ from collections.abc import Sequence
 from collections.abc import Callable
 
 from nemo.core.context.builder import ContextBuilder
+from nemo.core.context.compaction import CompactionCheckpoint, ContextEngine, ContextWindow
 from nemo.core.context.reminder import describe, fit_reminders, slot_open, step_budget
 from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import (
@@ -15,10 +16,14 @@ from nemo.core.tools.registry import ToolRegistry
 
 class AgentRuntime:
     def __init__(self, model: Model, tools: ToolRegistry,
-                 context: ContextBuilder | None = None):
+                 context: ContextBuilder | None = None,
+                 context_window: ContextWindow | None = None,
+                 checkpoint: CompactionCheckpoint | None = None):
         self.model = model
         self.tools = tools
         self.context = context or ContextBuilder()
+        self.context_engine = (ContextEngine(self.context, model, context_window, checkpoint)
+                               if context_window else None)
 
     async def run(self, prompt: str, *, max_steps: int = 10,
                   cancel: asyncio.Event | None = None,
@@ -66,7 +71,23 @@ class AgentRuntime:
                 # Reminders only exist while the model keeps acting. The user's
                 # own turn has the full step budget, so nothing is injected there.
                 reminders = fit_reminders((step_budget(step, max_steps),)) if slot_open(state) else ()
-                request = self.context.build(state, self.tools, reminders)
+                if self.context_engine:
+                    def compression_event(stage: str, usage: ModelUsage | None) -> None:
+                        if stage == "started":
+                            emit(EventType.CONTEXT_COMPRESSION_STARTED)
+                        else:
+                            emit(EventType.CONTEXT_COMPRESSION_COMPLETED, **_usage_payload(usage))
+
+                    request, compacted = await self.context_engine.build(
+                        state, self.tools, reminders, on_compression=compression_event
+                    )
+                    for checkpoint in compacted:
+                        emit(EventType.CONTEXT_COMPACTED,
+                             covered_messages=checkpoint.covered_messages,
+                             history_digest=checkpoint.history_digest,
+                             summary=checkpoint.summary)
+                else:
+                    request = self.context.build(state, self.tools, reminders)
                 emit(EventType.MODEL_STARTED, reminders=describe(reminders))
                 partial_text.clear()
                 partial_reasoning.clear()

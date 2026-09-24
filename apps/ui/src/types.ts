@@ -84,6 +84,8 @@ export interface Provider {
 export interface SettingsModel {
   model_name: string;
   model_id: string;
+  context_window_tokens: number | null;
+  response_reserve_tokens: number;
   capabilities: string[];
   is_default: boolean;
 }
@@ -116,6 +118,8 @@ export interface ProviderSettingsDraft {
   timeout_seconds: number;
   model_name: string;
   model_id: string;
+  context_window_tokens: number | null;
+  response_reserve_tokens: number;
   tool_calling: boolean;
   make_default: boolean;
   api_key: { action: SecretAction; value?: string };

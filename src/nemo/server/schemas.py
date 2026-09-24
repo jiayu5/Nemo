@@ -145,6 +145,8 @@ class ProviderSettingsRequest(ApiModel):
     timeout_seconds: float = Field(default=60.0, gt=0, le=600)
     model_name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
     model_id: str = Field(min_length=1)
+    context_window_tokens: int | None = Field(default=None, ge=1024)
+    response_reserve_tokens: int = Field(default=2048, ge=1)
     tool_calling: bool = True
     make_default: bool = False
     api_key: SecretMutation = Field(default_factory=SecretMutation)
@@ -154,6 +156,8 @@ class ProviderSettingsRequest(ApiModel):
 class SettingsModelResponse(ApiModel):
     model_name: str
     model_id: str
+    context_window_tokens: int | None = None
+    response_reserve_tokens: int = 2048
     capabilities: list[str]
     is_default: bool
 

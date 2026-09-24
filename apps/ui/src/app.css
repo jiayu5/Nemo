@@ -453,6 +453,9 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .event-row b { color: #849599; font-weight: 500; }
 .event-row span { overflow: hidden; color: #466168; text-overflow: ellipsis; white-space: nowrap; }
 .event-row small { color: #849599; }
+.event-row details { min-width: 0; color: #466168; }
+.event-row summary { cursor: pointer; }
+.event-row details p { margin: 8px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 11px/1.5 "SFMono-Regular", Consolas, monospace; }
 .providers-card { padding: 13px 15px; border-top: 1px solid var(--line); background: #e3ece9; }
 .providers-title { display: flex; align-items: center; margin-bottom: 7px; }
 .providers-title h3 { margin: 0; color: #506b70; font-size: 9px; font-weight: 700; }

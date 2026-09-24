@@ -65,6 +65,8 @@ Content-Type: application/json
 
 草稿一次新增或更新一个 Provider 和一个 Model。API Key 与 Proxy 分别使用 `keep`、`replace`、`delete`；只有 `replace` 接受新值。响应、验证错误和 OpenAPI 输出均不包含提交的值。进程环境来源是只读覆盖层，不能通过接口替换或删除。
 
+Model 草稿可带 `context_window_tokens`（整数或 `null`）与 `response_reserve_tokens`（正整数）。省略这两个字段更新已有模型时保留原值；显式传 `null` 关闭该模型的自动压缩。字段含义见 [配置参考](configuration.md#model)。
+
 保存会保留 UI 不编辑的 Alias、Profile、Provider headers 和 Model parameters。保存成功后目录查询、连接测试和新 Run 读取新配置；活动 Run 不热切换。保存本身不发起外部请求。
 
 删除 Provider 是显式危险操作。Server 会级联删除其模型以及指向这些模型的 Alias/Profile；当前默认项受影响时改用第一个剩余模型。为保证配置始终可用，最后一个已配置模型不能删除。删除不会清理 `.env` 中的值，避免误删共用凭据。
@@ -110,6 +112,8 @@ Content-Type: application/json
 `GET /runs/{run_id}/events` 以数据库事件序号作为 SSE `id`，领域事件类型作为 `event`，完整 Event JSON 作为 `data`。
 
 模型流式正文以 `model.delta`、推理以 `model.reasoning_delta` 事件分别传递。两者的 `payload.text` 都是经过脱敏的文本增量，`step` 指向本次模型调用。服务端合并短片段后写入事件表，避免逐字写 SQLite；`model.completed` 随后报告工具调用数量与可用的 token 用量。工具调用参数不随增量发送，必须等模型完整返回并通过校验后才会执行。Run 收敛时仍保存一条完整的助手消息，其中 `reasoning_content` 与 `content` 分开；取消中途已显示的文字也保存在会话历史中。未返回推理的模型不会产生推理事件。
+
+配置了模型上下文窗口且需要压缩时，SSE 另有 `context.compression_started`、`context.compression_completed` 和 `context.compacted`。完成事件报告 Provider 可用的 token 用量；`context.compacted` 的 payload 包含 `covered_messages`、`history_digest` 和脱敏摘要 `summary`，便于检查摘要覆盖范围。压缩调用不计入 Run 的 `max_steps`，但会额外访问 Provider。摘要存于现有事件表，不新增数据库 schema；详见 [Context 设计](../design/context-assembly.md#8-m7-上下文窗口与压缩)。
 
 客户端可用以下任一游标续读：
 

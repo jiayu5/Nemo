@@ -31,6 +31,13 @@ def render_event(event: Event) -> str:
             f"cached={_count(payload.get('cached_prompt_tokens'))} "
             f"completion={_count(payload.get('completion_tokens'))}"
         )
+    elif event.type == EventType.CONTEXT_COMPRESSION_COMPLETED:
+        line = (
+            f"{event.seq:>3} {event.type} "
+            f"prompt={_count(payload.get('prompt_tokens'))} "
+            f"cached={_count(payload.get('cached_prompt_tokens'))} "
+            f"completion={_count(payload.get('completion_tokens'))}"
+        )
     elif event.type in (
         EventType.TOOL_STARTED,
         EventType.TOOL_COMPLETED,

@@ -11,9 +11,10 @@ from nemo.core.contracts.events import EventType
 from nemo.cli.approver import TerminalApprover
 from nemo.cli.render import render_event
 from nemo.cli.streams import Streams
-from nemo.cli.transcript import SessionHeader, append_messages, list_sessions, load_transcript, write_header
+from nemo.cli.transcript import SessionHeader, append_compaction, append_messages, list_sessions, load_transcript, write_header
 from nemo.config.secrets import SecretLoader
 from nemo.core.context.builder import DEFAULT_MAX_INSTRUCTIONS_CHARS, ContextBuilder
+from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.session import Session
@@ -42,7 +43,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
         output.write(f"workspace is not a directory: {workspace}")
         return 2
 
-    session, path, resumed = open_session(args, workspace, directory, output)
+    session, path, resumed, checkpoint = open_session(args, workspace, directory, output)
     if session is None:
         return 2
 
@@ -64,6 +65,11 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
             user_instructions=user_instructions,
             project_instructions=project_instructions,
         ),
+        context_window=(
+            ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
+            if resolved.context_window_tokens is not None else None
+        ),
+        checkpoint=checkpoint,
     )
 
     write_header(
@@ -122,7 +128,7 @@ def open_session(args, workspace: Path, directory: Path, output: Streams):
             output.write(f"unknown session: {args.session}")
             known = ", ".join(candidate.stem for candidate in list_sessions(directory)) or "none"
             output.write(f"sessions in {directory}: {known}")
-            return None, path, False
+            return None, path, False, None
         loaded = load_transcript(path)
         session = Session(session_id=args.session, workspace=workspace, messages=list(loaded.messages))
         if loaded.header and loaded.header.workspace != str(workspace):
@@ -141,14 +147,14 @@ def open_session(args, workspace: Path, directory: Path, output: Streams):
                 "were skipped (a killed process can leave a torn last line); "
                 "the resumed history may be missing its tail"
             )
-        return session, path, True
+        return session, path, True, loaded.checkpoint
 
     session = Session(workspace=workspace)
     path = directory / f"{session.session_id}.jsonl"
     while path.exists():
         session = Session(workspace=workspace)
         path = directory / f"{session.session_id}.jsonl"
-    return session, path, False
+    return session, path, False, None
 
 
 def describe_instructions(user: str | None, project: str | None) -> str:
@@ -187,6 +193,12 @@ async def run_turn(
 
     def on_event(event):
         nonlocal streamed
+        if event.type == EventType.CONTEXT_COMPACTED:
+            append_compaction(path, CompactionCheckpoint(
+                covered_messages=event.payload["covered_messages"],
+                history_digest=event.payload["history_digest"],
+                summary=event.payload["summary"],
+            ))
         if event.type == EventType.MODEL_DELTA:
             chunk = event.payload.get("text")
             if isinstance(chunk, str) and chunk:

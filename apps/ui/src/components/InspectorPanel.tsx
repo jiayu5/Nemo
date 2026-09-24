@@ -62,7 +62,16 @@ export function InspectorPanel({
           <div className="event-list">
             {events.map((event) => (
               <div className="event-row" key={event.seq}>
-                <b>{event.seq}</b><span>{event.type}</span><small>step {event.step}</small>
+                <b>{event.seq}</b>
+                {event.type === "context.compacted" ? (
+                  <details>
+                    <summary>Context compressed through message {String(event.payload.covered_messages)}</summary>
+                    <p>{String(event.payload.summary ?? "")}</p>
+                  </details>
+                ) : event.type === "context.compression_completed" ? (
+                  <span>Compression model call · prompt {String(event.payload.prompt_tokens ?? "unknown")} · reply {String(event.payload.completion_tokens ?? "unknown")} tokens</span>
+                ) : <span>{event.type}</span>}
+                <small>step {event.step}</small>
               </div>
             ))}
             {!events.length && <p className="empty-note">Run events will appear here.</p>}

@@ -9,7 +9,8 @@ from nemo.cli.approver import parse_answer
 from nemo.cli.main import main
 from nemo.redaction import redact
 from nemo.cli.streams import Streams
-from nemo.cli.transcript import SessionHeader, append_messages, load_transcript, write_header
+from nemo.cli.transcript import SessionHeader, append_compaction, append_messages, load_transcript, write_header
+from nemo.core.context.compaction import CompactionCheckpoint, history_digest
 from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.types import Message, ModelResponse, ToolCall
 from nemo.core.session import Session
@@ -114,6 +115,15 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual([m.model_dump() for m in loaded.messages],
                          [m.model_dump() for m in messages])
         self.assertEqual(loaded.redacted, 0)
+
+    def test_compaction_checkpoint_round_trips_without_changing_messages(self):
+        messages = [Message(role="user", content="earlier"), Message(role="assistant", content="done")]
+        append_messages(self.path, messages)
+        checkpoint = CompactionCheckpoint(2, history_digest(messages), "Earlier work is done.")
+        append_compaction(self.path, checkpoint)
+        loaded = load_transcript(self.path)
+        self.assertEqual(loaded.checkpoint, checkpoint)
+        self.assertEqual(loaded.messages, tuple(messages))
 
     def test_header_is_written_once(self):
         write_header(self.path, self.header(model="first"))
