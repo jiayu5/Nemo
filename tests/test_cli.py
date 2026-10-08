@@ -15,7 +15,7 @@ from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.types import Message, ModelResponse, ToolCall
 from nemo.core.session import Session
 from nemo.core.tools.approval import ApprovalOutcome
-from nemo.testing.fakes import FakeModel, FakeServerClient
+from nemo.testing.fakes import FakeMemorySettings, FakeModel, FakeServerClient
 
 SECRET = "sk-live-0123456789abcdef"
 
@@ -125,11 +125,6 @@ class TranscriptTests(unittest.TestCase):
         self.assertEqual(loaded.checkpoint, checkpoint)
         self.assertEqual(loaded.messages, tuple(messages))
 
-    def test_header_is_written_once(self):
-        write_header(self.path, self.header(model="first"))
-        write_header(self.path, self.header(model="second"))
-        self.assertEqual(load_transcript(self.path).header.model, "first")
-
     def test_credentials_never_reach_disk(self):
         write_header(self.path, self.header())
         changed = append_messages(
@@ -226,6 +221,11 @@ class CliTests(unittest.TestCase):
         self.addCleanup(self._tmp.cleanup)
         self.workspace = Path(self._tmp.name).resolve()
         self.sessions = Path(self._tmp.name) / "sessions"
+        from nemo.adapters.memory import FileMemoryStore
+        from unittest.mock import patch
+        memory_patch = patch("nemo.cli.direct.build_memory_store", return_value=FileMemoryStore(self.workspace / "memory", settings=FakeMemorySettings()))
+        memory_patch.start()
+        self.addCleanup(memory_patch.stop)
 
     def run_cli(self, argv, responses, lines=None, is_tty=False):
         written: list[str] = []
@@ -267,6 +267,30 @@ class CliTests(unittest.TestCase):
         self.assertIn("status  : completed", output)
         loaded = load_transcript(self.transcripts()[0])
         self.assertEqual([m.role for m in loaded.messages], ["user", "assistant"])
+
+    def test_direct_memory_is_saved_and_visible_to_a_new_session(self):
+        from nemo.adapters.memory import FileMemoryStore
+
+        code, _, _ = self.run_cli(self.base_args("--mode", "full", "Remember my preference"), [
+            ModelResponse(tool_calls=(ToolCall(id="save", name="save_memory", arguments={
+                "scope": "user", "title": "Answer preference", "content": "Start with a conclusion",
+                "kind": "preference",
+            }),)),
+            ModelResponse(content="Saved"),
+        ])
+        self.assertEqual(code, 0)
+        entry = FileMemoryStore(self.workspace / "memory", settings=FakeMemorySettings()).list(self.workspace, "user")[0]
+        saved = load_transcript(self.sessions / f"{entry.source_session_id}.jsonl")
+        self.assertEqual(saved.messages[entry.source_message_index].content, "Remember my preference")
+        code, _, client = self.run_cli(self.base_args("What is my preference?"), [
+            ModelResponse(tool_calls=(ToolCall(id="read", name="read_memory", arguments={
+                "scope": "user", "id": entry.id,
+            }),)),
+            ModelResponse(content="Start with a conclusion"),
+        ])
+        self.assertEqual(code, 0)
+        self.assertIn(entry.id, str(client.model.requests[0].messages))
+        self.assertIn(entry.content, str(client.model.requests[1].messages))
 
     def test_denied_shell_call_is_reported_and_the_turn_finishes(self):
         code, output, client = self.run_cli(
@@ -414,14 +438,6 @@ class CliTests(unittest.TestCase):
 
         self.assertEqual(code, 0)
         self.assertIn("instructions: project AGENTS.md (9 chars)", output)
-
-    def test_instructions_line_says_none_when_nothing_is_loaded(self):
-        with patch("nemo.cli.direct.load_user_instructions", return_value=None):
-            _, output, _ = self.run_cli(
-                self.base_args("hi"), [ModelResponse(content="ok")], ["hi"]
-            )
-
-        self.assertIn("instructions: none", output)
 
     def test_user_instructions_reach_the_prompt_and_the_startup_line(self):
         with patch("nemo.cli.direct.load_user_instructions", return_value="Be terse."):

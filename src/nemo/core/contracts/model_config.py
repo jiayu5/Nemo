@@ -64,6 +64,7 @@ class ProfileConfig(Contract):
 
 
 class AppConfig(Contract):
+    memory_enabled: bool = True
     providers: dict[str, ProviderConfig]
     models: dict[str, ModelConfig]
     aliases: dict[str, NonEmptyStr] = Field(default_factory=dict)

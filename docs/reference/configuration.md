@@ -6,7 +6,7 @@
 
 | 位置 | 内容 | 是否可含密钥 |
 |---|---|---|
-| `~/.nemo/config.toml` | Provider、Model、Alias、Profile、默认选择 | 否 |
+| `~/.nemo/config.toml` | Provider、Model、Alias、Profile、默认选择与记忆开关 | 否 |
 | `~/.nemo/.env` | Provider API Key | 是，权限必须为 `600` |
 | 进程环境变量 | 临时覆盖 API Key、HTTP Proxy、证书环境 | 是，优先级最高 |
 
@@ -123,3 +123,7 @@ Provider 设置了 `proxy_env` 后，Nemo 使用与 API Key 相同的解析顺�
 - Connections 只返回 `environment`、`file` 或缺失状态；环境变量来源不能由 UI 覆盖或删除。
 - Provider URL 对外显示前会移除 userinfo、query 和 fragment。
 - UI 保存先校验完整候选配置，再原子替换文件；新 Run 立即读取新配置，活动 Run 保持原 Model Client。
+
+## 长期记忆开关
+
+顶层 `memory_enabled` 控制模型的记忆读写，默认 `true`。存储与管理语义见 [Memory 参考](memory.md)。

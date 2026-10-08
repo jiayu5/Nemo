@@ -12,7 +12,8 @@ from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse, StreamingResponse
 
-from nemo.core.contracts.errors import ConfigError, NemoError
+from nemo.core.contracts.errors import ConfigError, NemoError, ToolFailure
+from nemo.core.memory import MemoryDraft
 from nemo.core.contracts.types import Message
 from nemo.server.errors import (
     ApprovalConflictError,
@@ -25,6 +26,7 @@ from nemo.server.errors import (
 from nemo.server.repository import TERMINAL_STATUSES
 from nemo.server.schemas import (
     ActionResponse,
+    MemorySaveRequest, MemoryForgetRequest, MemorySettingsRequest,
     ApprovalAnswerRequest,
     CreateRunRequest,
     CreateSessionRequest,
@@ -91,6 +93,36 @@ def create_app(
             for error in exc.errors()
         ]
         return JSONResponse(status_code=422, content={"detail": details})
+
+    def memory_action(action):
+        try:
+            return action()
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=409, detail=exc.public_message) from None
+        except (OSError, UnicodeError):
+            raise HTTPException(status_code=500, detail="could not access memory storage") from None
+
+    @app.get("/sessions/{session_id}/memories")
+    def memories(session_id: str) -> dict:
+        return memory_action(lambda: agent_service.memories.list(session_id))
+
+    @app.post("/sessions/{session_id}/memories")
+    def save_memory(session_id: str, body: MemorySaveRequest) -> dict:
+        return memory_action(lambda: agent_service.memories.save(
+            session_id, body.scope, MemoryDraft(title=body.title, content=body.content, kind=body.kind),
+            entry_id=body.id, revision=body.revision))
+
+    @app.post("/sessions/{session_id}/memories/forget")
+    def forget_memory(session_id: str, body: MemoryForgetRequest) -> dict:
+        memory_action(lambda: agent_service.memories.forget(session_id, body.scope, body.id, body.revision))
+        return {"status": "forgotten"}
+
+    @app.put("/memory/settings")
+    def memory_settings(body: MemorySettingsRequest) -> dict:
+        memory_action(lambda: agent_service.memories.require_store().set_enabled(body.enabled))
+        return {"enabled": body.enabled}
 
     @app.get("/health")
     async def health() -> dict[str, str]:

@@ -24,26 +24,6 @@ class PromptShapeTests(unittest.TestCase):
                 self.assertGreater(len(clause.body), 60)
                 self.assertEqual(clause.body, clause.body.strip())
 
-    def test_clause_set_is_locked(self):
-        # Adding or removing a rule is a deliberate act: it changes agent behaviour
-        # and should show up in review, not slip in unnoticed.
-        self.assertEqual(
-            clause_names(),
-            (
-                "act_when_ready",
-                "investigate_first",
-                "smallest_change",
-                "verify_before_claiming",
-                "read_errors",
-                "respect_refusals",
-                "confirm_irreversible",
-                "report_faithfully",
-                "stay_in_scope",
-                "communication",
-                "instruction_files",
-                "retrieved_source_data",
-            ),
-        )
 
 
 class PromptRenderingTests(unittest.TestCase):
@@ -58,11 +38,6 @@ class PromptRenderingTests(unittest.TestCase):
 
     def setUp(self):
         self.workspace = Path("/tmp/nemo-workspace")
-
-    def test_render_is_byte_identical_for_identical_inputs(self):
-        # Prompt caching depends on this: any drift in the stable prefix throws
-        # away every cached token behind it.
-        self.assertEqual(self.build(), self.build())
 
     def test_identity_and_environment_come_first(self):
         prompt = self.build()

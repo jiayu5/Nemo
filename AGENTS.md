@@ -4,7 +4,7 @@
 
 Nemo 是个人 Agent OS 与 Agent 技术实验平台：基础设施使用成熟库，Agent Runtime 与核心智能机制自行实现。
 
-Phase 1 的 M1–M5 已完成，下一阶段是 M6 macOS App。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
+当前已推进至 Phase 2 的 M9 长期记忆。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
 
 ## 目录职责
 

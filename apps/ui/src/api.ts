@@ -2,6 +2,7 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
   ApprovalMode,
+  MemoryState, MemoryDraft, MemoryEntry,
   Message,
   ModelOption,
   Provider,
@@ -99,6 +100,16 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  memories: (sessionId: string) => request<MemoryState>(`/sessions/${encodeURIComponent(sessionId)}/memories`),
+  saveMemory: (sessionId: string, draft: MemoryDraft) => request<MemoryEntry>(
+    `/sessions/${encodeURIComponent(sessionId)}/memories`, { method: "POST", body: JSON.stringify(draft) }),
+  forgetMemory: (sessionId: string, entry: MemoryEntry) => request<{ status: string }>(
+    `/sessions/${encodeURIComponent(sessionId)}/memories/forget`, {
+      method: "POST", body: JSON.stringify({ scope: entry.scope, id: entry.id, revision: entry.revision }),
+    }),
+  setMemoryEnabled: (enabled: boolean) => request<{ enabled: boolean }>("/memory/settings", {
+    method: "PUT", body: JSON.stringify({ enabled }),
+  }),
   health: () => request<{ status: string }>("/health"),
   sessions: () => request<Session[]>("/sessions"),
   createSession: (workspace: string, model: string | null, approvalMode: ApprovalMode) =>

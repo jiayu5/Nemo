@@ -1,8 +1,8 @@
 # Nemo
 
-Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩和工作区文本检索。
+Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯。
 
-Phase 1 的 M1–M6 与 Phase 2 的 M7–M8 已完成，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
+Phase 1 的 M1–M6 与 Phase 2 的 M7–M9 已实现，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
 
 ## 快速开始
 
@@ -56,6 +56,8 @@ open apps/ui/src-tauri/target/release/bundle/macos/Nemo.app
 ```
 
 首次使用前先在 `~/.nemo/config.toml` 配好 Provider/Model，并把密钥写入权限为 `600` 的 `~/.nemo/.env`；否则应用能启动但没有可用模型。桌面端、CLI 和浏览器端共用 `~/.nemo/nemo.db` 中的会话历史；同一 Session 同时只运行一个任务。旧版桌面历史需要在两端 Server 都退出后运行 `conda run -n nemo python -m nemo.adapters.persistence.merge_desktop` 合并（会备份并保留原库）。构建产物未签名、未公证，首次打开若被 Gatekeeper 拦截，用右键“打开”确认一次即可。访问条件见 [Server API 参考](docs/reference/server-api.md#桌面-sidecar-访问条件)。
+
+顶栏 **Memories** 可管理用户与当前项目记忆，并查看来源；使用规则见 [Memory 参考](docs/reference/memory.md)。
 
 桌面端点击“Open a workspace”或“Browse…”会打开 macOS 目录选择器；浏览器端仍可直接输入目录。Session 可从左侧列表删除，删除前需要二次确认；活动 Run 所在的 Session 不可删除。
 

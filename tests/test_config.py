@@ -193,6 +193,28 @@ class ConfigEditorTests(ConfigTestCase):
             environ=environ or {},
         )
 
+    def test_memory_toggle_persists_without_touching_secrets(self):
+        path = self.write(VALID_CONFIG)
+        secret = self.dir / ".env"
+        secret.write_text("DEMO_API_KEY=unchanged\n")
+        secret.chmod(0o640)
+        editor = self.editor()
+        self.assertTrue(editor.memory_enabled())
+        editor.set_memory_enabled(False)
+        self.assertFalse(self.editor().memory_enabled())
+        self.assertEqual(load_config(path).default, "chat")
+        self.assertEqual(secret.read_text(), "DEMO_API_KEY=unchanged\n")
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o640)
+        editor.set_memory_enabled(True)
+        self.assertTrue(load_config(path).memory_enabled)
+
+    def test_memory_toggle_requires_initial_model_configuration(self):
+        editor = self.editor()
+        self.assertTrue(editor.memory_enabled())
+        with self.assertRaises(ConfigError):
+            editor.set_memory_enabled(False)
+        self.assertFalse(editor.config_path.exists())
+
     def test_candidate_preserves_advanced_fields_and_round_trips(self):
         config_path = self.write(
             VALID_CONFIG.replace(

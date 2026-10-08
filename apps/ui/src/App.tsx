@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { MemoryPanel } from "./components/MemoryPanel";
 import { Conversation } from "./components/Conversation";
 import { InspectorPanel } from "./components/InspectorPanel";
 import type { InspectorView } from "./components/InspectorPanel";
@@ -7,6 +8,7 @@ import { useNemoWorkspace } from "./hooks/useNemoWorkspace";
 
 export default function App() {
   const workspace = useNemoWorkspace();
+  const [showMemory, setShowMemory] = useState(false);
   const [inspectorView, setInspectorView] = useState<InspectorView>("activity");
 
   return (
@@ -27,6 +29,7 @@ export default function App() {
           type="button"
           onClick={() => setInspectorView("connections")}
         >Connections</button>
+        <button className="settings-toggle" type="button" onClick={() => setShowMemory(true)}>Memories</button>
         <span className={`server-pill ${workspace.serverOnline ? "online" : "offline"}`}>
           <i /> {workspace.serverOnline ? "Server online" : "Server offline"}
         </span>
@@ -72,6 +75,8 @@ export default function App() {
           onSettingsSaved={workspace.refreshConfiguration}
         />
       </main>
+
+      {showMemory && <MemoryPanel key={workspace.selected?.session_id} session={workspace.selected} onClose={() => setShowMemory(false)} />}
 
       <footer className="statusbar">
         <span className="workspace-status"><i /><b>Workspace</b> {workspace.selected?.workspace ?? "—"}</span>

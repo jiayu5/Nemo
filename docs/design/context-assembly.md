@@ -6,14 +6,14 @@
 
 Context Builder 负责决定一次模型调用实际收到哪些消息，同时保证稳定前缀可缓存、Session 历史不被修改、临时运行信息不累积。
 
-`ContextBuilder` 仍只负责稳定前缀、历史和 Reminder 的组装。M7 的 `ContextEngine` 在外层选择历史并按需压缩；M8 的搜索结果作为正常工具消息进入历史，再由 Builder 组装。Core 不读取文件，也不提供长期 Memory。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
+`ContextBuilder` 仍只负责稳定前缀、历史和 Reminder 的组装。M7 的 `ContextEngine` 在外层选择历史并按需压缩；M8 的搜索结果作为正常工具消息进入历史，再由 Builder 组装。Core 不读取文件；M9 Memory 端口与索引历史规则见 [长期记忆设计](long-term-memory.md)。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
 
 ## 2. 三层 Context
 
 | 层 | 生命周期 | 内容 |
 |---|---|---|
 | 稳定前缀 | Session | 系统提示、用户级说明、项目级说明 |
-| 会话历史 | 跨 Run | 用户、assistant、tool 消息 |
+| 会话历史 | 跨 Run | 用户、assistant、tool 消息，以及 M9 应用数据索引 |
 | Reminder | 单次模型调用 | step budget 等临时状态 |
 
 组装顺序固定为：系统行为条款 → `~/.nemo/AGENTS.md` → `<workspace>/AGENTS.md` → Session 历史 → Reminder。
@@ -62,7 +62,7 @@ Reminder 是追加在历史之后的独立 user 消息，遵守三条规则：
 
 ## 7. 后续
 
-T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。工作区检索见 [M8 设计](workspace-retrieval.md)；长期 Memory 仍属 Phase 2 后续工作。
+T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。工作区检索见 [M8 设计](workspace-retrieval.md)；M9 长期 Memory 见 [长期记忆设计](long-term-memory.md)。
 
 ## 8. M7 上下文窗口与压缩
 

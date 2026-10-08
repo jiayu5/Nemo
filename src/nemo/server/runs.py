@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
+from nemo.core.memory import MemoryStore, memory_messages
 from nemo.config.loader import load_config
 from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
@@ -40,10 +41,12 @@ class RunManager:
         *,
         client_factory: Callable[..., Any],
         tools_factory: Callable[[], tuple[Any, ...]] = tuple,
+        memory_store: MemoryStore | None = None,
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
     ) -> None:
         self.repository = repository
+        self.memory_store = memory_store
         self._client_factory = client_factory
         self._tools_factory = tools_factory
         self._approval_timeout = approval_timeout_seconds
@@ -185,13 +188,19 @@ class RunManager:
                     protocol=resolved.protocol,
                     provider=provider,
                 )
+            history = self.repository.messages(session["session_id"])
+            if self.memory_store:
+                catalog = await asyncio.to_thread(self.memory_store.catalog, Path(session["workspace"]))
+                history = (*history, *memory_messages(history, catalog))
             tools = self._tools_factory()
             policy = ApprovalPolicy(
                 ApprovalMode(session["approval_mode"]), approver=self._approver(run_id)
             )
             registry = ToolRegistry(
                 tools,
-                context=ExecutionContext(workspace=Path(session["workspace"])),
+                context=ExecutionContext(workspace=Path(session["workspace"]),
+                                         session_id=session["session_id"], run_id=run_id,
+                                         source_message_index=len(history)),
                 policy=policy,
             )
             runtime = AgentRuntime(
@@ -222,7 +231,7 @@ class RunManager:
                 max_steps=max_steps,
                 cancel=cancel,
                 on_event=persist,
-                history=self.repository.messages(session["session_id"]),
+                history=history,
                 run_id=run_id,
             )
             self.repository.finish_run(result, terminal_event=result.events[-1])

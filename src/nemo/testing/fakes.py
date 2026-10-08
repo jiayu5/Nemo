@@ -141,3 +141,14 @@ class FakeServerClient:
 
     async def events(self, run_id, *, after=0):
         yield Event(run_id=run_id, seq=1, step=1, type=EventType.RUN_COMPLETED)
+
+
+class FakeMemorySettings:
+    def __init__(self):
+        self.enabled = True
+
+    def memory_enabled(self) -> bool:
+        return self.enabled
+
+    def set_memory_enabled(self, enabled: bool) -> None:
+        self.enabled = enabled

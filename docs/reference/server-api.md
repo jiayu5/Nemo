@@ -149,3 +149,7 @@ Server 不解析 `:mode` 等上层 UI 命令；它只处理明确的资源和动
 ## 当前安全边界
 
 Server 仅允许绑定 `127.0.0.1`、`localhost` 或 `::1`。命令行 Server 与浏览器开发模式没有请求认证和 Origin 检查；开发态 UI 使用 Vite `/api` 代理保持同源。打包应用由 Tauri sidecar 注入每次启动生成的 `X-Nemo-Token` 并收紧 Origin，见 [桌面 sidecar 访问条件](#桌面-sidecar-访问条件)。
+
+## M9 Memory 管理
+
+用户/项目文件记忆、管理 HTTP API、模型召回工具和来源读取以 [Memory 参考](memory.md) 为权威来源。Session 的消息列表可能包含带 `Saved memory index (application data)` 标识的 assistant 数据消息，它记录记忆索引或开关变更，不是模型生成的回复。

@@ -204,16 +204,16 @@ class ShellToolTests(LocalToolTestCase):
 
     async def test_timeout_kills_the_whole_process_group(self):
         # The background subshell is a grandchild of the shell we start: killing
-        # only the shell would leave it alive to create marker.txt a second later.
+        # only the shell would leave it alive to create marker.txt shortly after.
         result = await self.registry().execute(
             call(
                 "run_shell",
-                {"command": "(sleep 1; echo late > marker.txt) & sleep 5", "timeout_seconds": 0.3},
+                {"command": "(sleep 0.5; echo late > marker.txt) & sleep 5", "timeout_seconds": 0.15},
             )
         )
         self.assertEqual(result.error.code, "execution_error")
         self.assertIn("timed out", result.error.message)
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.6)
         self.assertFalse((self.workspace / "marker.txt").exists())
 
     async def test_cancellation_kills_the_process_group_and_propagates(self):
@@ -223,17 +223,17 @@ class ShellToolTests(LocalToolTestCase):
                 call(
                     "run_shell",
                     {
-                        "command": "(sleep 1; echo late > marker.txt) & sleep 5",
+                        "command": "(sleep 0.5; echo late > marker.txt) & sleep 5",
                         "timeout_seconds": 10,
                     },
                 )
             )
         )
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.1)
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
-        await asyncio.sleep(1.2)
+        await asyncio.sleep(0.6)
         self.assertFalse((self.workspace / "marker.txt").exists())
 
     async def test_timeout_is_capped_by_the_context(self):

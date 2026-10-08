@@ -6,7 +6,8 @@ import asyncio
 import signal
 from pathlib import Path
 
-from nemo.bootstrap import build_local_tools
+from nemo.bootstrap import build_local_tools, build_memory_store
+from nemo.core.memory import MemoryStore, memory_messages
 from nemo.core.contracts.events import EventType
 from nemo.cli.approver import TerminalApprover
 from nemo.cli.render import render_event
@@ -51,7 +52,8 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     resolved = client.resolved
     mode = ApprovalMode(args.mode)
     policy = ApprovalPolicy(mode, approver=TerminalApprover(output))
-    tools = build_local_tools()
+    memory_store = build_memory_store()
+    tools = build_local_tools(memory_store=memory_store)
     user_instructions = load_user_instructions()
     project_instructions = load_project_instructions(workspace)
     registry = ToolRegistry(tools, context=ExecutionContext(workspace=workspace), policy=policy)
@@ -96,7 +98,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
 
     prompt = " ".join(args.prompt).strip()
     if prompt:
-        return exit_code(await run_turn(runtime, session, path, prompt, args, output))
+        return exit_code(await run_turn(runtime, session, path, prompt, args, output, memory_store=memory_store))
 
     output.write("type :help for commands, :exit to leave")
     while True:
@@ -118,7 +120,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
         if line.startswith(":"):
             output.write(f"unknown command: {line}")
             continue
-        exit_code(await run_turn(runtime, session, path, line, args, output))
+        exit_code(await run_turn(runtime, session, path, line, args, output, memory_store=memory_store))
 
 
 def open_session(args, workspace: Path, directory: Path, output: Streams):
@@ -184,7 +186,8 @@ def switch_mode(policy: ApprovalPolicy, line: str, output: Streams) -> None:
 
 
 async def run_turn(
-    runtime: AgentRuntime, session: Session, path: Path, prompt: str, args, output: Streams
+    runtime: AgentRuntime, session: Session, path: Path, prompt: str, args, output: Streams,
+    *, memory_store: MemoryStore | None = None,
 ):
     cancel = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -214,12 +217,19 @@ async def run_turn(
     except (NotImplementedError, RuntimeError):
         pass
     try:
+        history = session.history()
+        if memory_store:
+            catalog = await asyncio.to_thread(memory_store.catalog, session.workspace)
+            history = (*history, *memory_messages(history, catalog))
+        runtime.tools.context = runtime.tools.context.model_copy(update={
+            "session_id": session.session_id, "source_message_index": len(history),
+        })
         result = await runtime.run(
             prompt,
             max_steps=args.max_steps,
             cancel=cancel,
             on_event=on_event,
-            history=session.history(),
+            history=history,
         )
     finally:
         if installed:

@@ -28,9 +28,11 @@
 | M6 · macOS App | 已完成 | 2026-09-23 | [M6](milestones/M6-macos-app.md) |
 | M7 · 上下文窗口与压缩 | 已完成 | 2026-09-24 | [M7](milestones/M7-context-compaction.md) |
 | M8 · 工作区检索 | 已完成 | 2026-09-24 | [M8](milestones/M8-workspace-retrieval.md) |
+| M9 · 长期记忆与会话追溯 | 已完成 | 2026-10-08 | [M9](milestones/M9-long-term-memory.md) |
 
 ## 现行参考
 
+- [Memory](reference/memory.md)：用户/项目文件记忆、工具、管理 API 与来源追溯。
 - [Server API](reference/server-api.md)：HTTP/SSE、Prompt 传递、生命周期和持久化。
 - [配置参考](reference/configuration.md)：Provider、Model、Profile、密钥、环境变量和 Proxy。
 
@@ -39,6 +41,7 @@
 | 文档 | 状态 | 主题 |
 |---|---|---|
 | [context-assembly](design/context-assembly.md) | 已实现；T1 待定 | 稳定前缀、项目说明、Reminder 与上下文压缩 |
+| [long-term-memory](design/long-term-memory.md) | 已实现 | 用户/项目记忆、来源会话、追加式索引和管理界面 |
 | [workspace-retrieval](design/workspace-retrieval.md) | 已实现；embedding 待评估 | 模型按需搜索、词法排序、短预览与历史复用 |
 | [cli-and-approval](design/cli-and-approval.md) | 已实现 | Session、三档审批、终端交互与脱敏 |
 | [server-and-persistence](design/server-and-persistence.md) | 已实现 | Server、SQLite、SSE 与生命周期 |

@@ -3,12 +3,14 @@
 from collections.abc import Callable
 from typing import Any
 
+from nemo.core.memory import MemoryStore, memory_messages
 from nemo.config.loader import load_config
 from nemo.config.editor import ConfigEditor
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.types import Event, Message
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
 from nemo.server.catalog import CatalogService
+from nemo.server.memory import MemoryService
 from nemo.server.repository import Repository
 from nemo.server.runs import RunManager
 from nemo.server.sessions import SessionService
@@ -23,12 +25,15 @@ class NemoApplication:
         *,
         client_factory: Callable[..., Any],
         tools_factory: Callable[[], tuple[Any, ...]] = tuple,
+        memory_store: MemoryStore | None = None,
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
         secret_loader_factory: Callable[[], Any] = SecretLoader,
         config_editor: ConfigEditor | None = None,
     ) -> None:
         self.repository = repository
+        self.memory_store = memory_store
+        self.memories = MemoryService(repository, memory_store)
         self.sessions = SessionService(repository, config_loader=config_loader)
         self.catalog = CatalogService(
             client_factory=client_factory,
@@ -39,6 +44,7 @@ class NemoApplication:
             repository,
             client_factory=client_factory,
             tools_factory=tools_factory,
+            memory_store=memory_store,
             approval_timeout_seconds=approval_timeout_seconds,
             config_loader=config_loader,
         )

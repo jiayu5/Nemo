@@ -17,6 +17,9 @@ class ExecutionContext(Contract):
     """
 
     workspace: Path
+    session_id: str | None = None
+    run_id: str | None = None
+    source_message_index: int | None = Field(default=None, ge=0)
     max_output_chars: int = Field(default=8000, gt=0)
     default_timeout_seconds: float = Field(default=30.0, gt=0)
     max_timeout_seconds: float = Field(default=300.0, gt=0)

@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 / M1–M6 已完成；Phase 2 / M7 上下文压缩与 M8 工作区检索已实现。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
+> 当前状态：Phase 1 / M1–M6 已完成；Phase 2 / M7 上下文压缩、M8 工作区检索与 M9 长期记忆已实现。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -71,7 +71,7 @@ flowchart TB
 | Contracts | `core/contracts/` | Pydantic 数据、Protocol、错误语义 | I/O、厂商装配 |
 | Runtime | `core/runtime/` | Agent Loop、状态、步数、终态、取消 | HTTP、SQLite、终端交互 |
 | Session | `core/session.py` | 会话标识、消息和 workspace 状态 | 文件或数据库 I/O |
-| Context | `core/context/`、`prompts/` | 稳定系统前缀、历史、工具 schema、Reminder、上下文窗口与压缩 | 长期 Memory |
+| Context | `core/context/`、`prompts/` | 稳定系统前缀、历史、工具 schema、Reminder、上下文窗口与压缩 | Memory 文件 I/O |
 | Model | `core/models/` | Registry、Resolver、统一 Model Client | 厂商判断、密钥持久化 |
 | Tool Core | `core/tools/` | 注册、参数校验、审批策略、路径与输出约束 | 具体文件或进程 I/O |
 | Adapters | `adapters/` | 协议、HTTP、持久化、Filesystem、Shell、Web | Agent Loop |
@@ -157,6 +157,8 @@ M7 加入可选的模型上下文窗口。超过输入规划量时，Context Eng
 
 M8 提供模型按需调用的 `search_workspace`：本地词法检索返回路径、行号与短预览，模型再按需使用 `read_file` 精读。工具结果进入 Session 历史；较早轮次可由 M7 压缩，当前轮次依靠小结果与窗口检查。普通问题不扫描工作区，没有 embedding 或持久索引。详细边界见 [工作区检索设计](docs/design/workspace-retrieval.md)。
 
+M9 通过文件存储保存用户与项目记忆，按需工具读取正文和来源会话。索引变化以应用数据消息追加到历史，不修改稳定前缀。Core 只定义 Memory 端口；Bootstrap 装配文件存储，Server 与直连 CLI 共享文件记忆。详见 [长期记忆设计](docs/design/long-term-memory.md)。
+
 ### Tool
 
 当前工具：
@@ -164,6 +166,8 @@ M8 提供模型按需调用的 `search_workspace`：本地词法检索返回路�
 | 类型 | 工具 | 主要边界 |
 |---|---|---|
 | 文件 | `search_workspace`、`read_file`、`write_file`、`edit_file`、`list_dir` | 真实路径必须位于 workspace；检索按需触发，输出受限 |
+| 记忆 | `search_memory`、`read_memory`、`save_memory`、`forget_memory` | 专用存储目录、用户/项目范围、版本检查和写入审批 |
+| 历史 | `search_sessions`、`read_session` | Server 历史只读；默认当前工作区，跨项目显式指定范围 |
 | 进程 | `run_shell` | 独立进程、显式 cwd、超时、输出上限、进程组清理 |
 | 网络 | `web_search`、`fetch_url` | 仅 HTTP/HTTPS、响应大小和重定向受限 |
 
@@ -198,7 +202,8 @@ flowchart LR
 - **Phase 1**：完成单 Agent 的可运行、可观察客户端闭环。
 - **Phase 2**：将基础 Context Builder 演进为带预算、检索和压缩的 Context Engine，并加入分层 Memory。
 - **M7 已交付**：上下文窗口规划和会话压缩。
-- **M8 已交付**：模型按需调用的工作区文本检索与历史复用；长期 Memory 留待后续里程碑。
+- **M8 已交付**：模型按需调用的工作区文本检索与历史复用。
+- **M9 已实现**：用户与项目文件记忆、按需召回、来源会话追溯和管理界面；尚无后台提炼与 embedding。
 - **Phase 3**：加入 Orchestrator、Subagents、Skills、MCP、Sandbox、Planning、Automation 和完整 Permission Engine。
 
 Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具集合和预算；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
@@ -215,6 +220,7 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M6 · macOS App | 已完成 | Tauri、Python sidecar、共享历史与 Run 属主协调、访问保护和 `onedir` 打包 |
 | M7 · Context Window & Compaction | 已完成 | 模型窗口配置、旧轮次压缩、摘要恢复与额外调用事件 |
 | M8 · Workspace Retrieval | 已完成 | 按需搜索工具、本地文本排序、有来源的短预览与历史复用 |
+| M9 · Long-term Memory | 已实现 | 用户/项目 Markdown 记忆、来源追溯、管理 API/UI、追加式索引与会话读取 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

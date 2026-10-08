@@ -230,3 +230,22 @@ class TraceResponse(ApiModel):
     model_calls: list[TraceModelCallResponse]
     tool_calls: list[TraceToolCallResponse]
     events: list[Event]
+
+
+class MemorySaveRequest(ApiModel):
+    scope: Literal["user", "project"] = "project"
+    title: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=3000)
+    kind: Literal["preference", "feedback", "project", "reference"] = "project"
+    id: str | None = Field(default=None, pattern=r"^[a-f0-9]{32}$")
+    revision: str | None = Field(default=None, pattern=r"^[a-f0-9]{64}$")
+
+
+class MemoryForgetRequest(ApiModel):
+    scope: Literal["user", "project"]
+    id: str = Field(pattern=r"^[a-f0-9]{32}$")
+    revision: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class MemorySettingsRequest(ApiModel):
+    enabled: bool

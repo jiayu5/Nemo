@@ -38,7 +38,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .topbar {
   z-index: 5;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr) auto auto;
+  grid-template-columns: 252px minmax(0, 1fr) auto auto auto;
   align-items: center;
   color: var(--ink);
   background: var(--paper);
@@ -574,17 +574,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 1050px) {
   .workspace-grid { grid-template-columns: 224px minmax(430px, 1fr); }
-  .topbar { grid-template-columns: 224px minmax(0, 1fr) auto; }
+  .topbar { grid-template-columns: 224px minmax(0, 1fr) auto auto auto; }
   .trace-panel { display: none; }
   .trace-panel.connections-view { width: min(680px, calc(100vw - 48px)); display: flex; }
 }
 
 @media (max-width: 720px) {
   .app-shell { grid-template-rows: 58px minmax(0, 1fr) 42px; }
-  .topbar { grid-template-columns: 1fr auto auto; }
+  .topbar { grid-template-columns: 1fr auto auto auto; }
   .brand-block { color: #edf6f4; }
   .brand-block p, .topbar-context { display: none; }
-  .server-pill { margin-right: 10px; }
+  .server-pill { margin-right: 10px; font-size: 0; gap: 0; padding: 9px; }
   .settings-toggle { margin-right: 2px; padding-left: 7px; padding-right: 7px; }
   .trace-panel.connections-view { top: 58px; width: 100vw; }
   .workspace-grid { grid-template-columns: 1fr; }
@@ -607,3 +607,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .delete-confirmation { align-items: stretch; flex-direction: column; }
   .delete-confirmation > div:last-child { justify-content: flex-end; }
 }
+
+.memory-dialog { width: min(720px, 90vw); max-height: 85vh; padding: 24px; border: 1px solid #d6dfdd; border-radius: 16px; color: #203936; background: #f8faf9; }
+.memory-dialog::backdrop { background: #102b3166; }
+.memory-dialog header, .memory-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.memory-dialog header { justify-content: space-between; }
+.memory-dialog h2, .memory-dialog h3 { margin: 10px 0; }
+.memory-dialog p, .memory-dialog small { line-height: 1.5; overflow-wrap: anywhere; }
+.memory-dialog button { color: #203936; padding: 7px 12px; border: 1px solid #bacdca; border-radius: 7px; background: white; cursor: pointer; }
+.memory-dialog button:disabled { opacity: .5; cursor: wait; }
+.memory-dialog article, .memory-dialog section, .memory-dialog form { border-top: 1px solid #d6dfdd; margin-top: 16px; padding-top: 12px; }
+.memory-dialog form label { display: grid; gap: 6px; margin: 10px 0; }
+.memory-dialog form input, .memory-dialog select, .memory-dialog textarea { width: 100%; padding: 9px; border: 1px solid #bacdca; border-radius: 6px; background: white; color: inherit; }
+.memory-dialog textarea { min-height: 120px; resize: vertical; }
+.memory-content { white-space: pre-wrap; }

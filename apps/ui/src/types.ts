@@ -178,3 +178,19 @@ export interface Trace {
   }>;
   events: RunEvent[];
 }
+
+export interface MemoryEntry {
+  id: string;
+  scope: "user" | "project";
+  title: string;
+  content: string;
+  kind: "preference" | "feedback" | "project" | "reference";
+  revision: string;
+  updated_at: string;
+  source_session_id: string | null;
+  source_message_index: number | null;
+  source_run_id: string | null;
+}
+export interface MemoryState { enabled: boolean; entries: MemoryEntry[] }
+export type MemoryDraft = Pick<MemoryEntry, "scope" | "title" | "content" | "kind"> &
+  Partial<Pick<MemoryEntry, "id" | "revision">>;

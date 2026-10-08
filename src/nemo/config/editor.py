@@ -39,6 +39,18 @@ class ConfigEditor:
             return None
         return load_config(self.config_path)
 
+    def memory_enabled(self) -> bool:
+        config = self.load_optional()
+        return config.memory_enabled if config else True
+
+    def set_memory_enabled(self, enabled: bool) -> None:
+        with self._lock:
+            config = self.load_optional()
+            if config is None:
+                raise ConfigError("configure a model before changing memory settings")
+            updated = config.model_copy(update={"memory_enabled": enabled})
+            _atomic_write(self.config_path, render_toml(updated), mode=0o600)
+
     def secret_source(self, name: str | None) -> str | None:
         if not name:
             return None
@@ -202,7 +214,8 @@ class ConfigEditor:
 def render_toml(config: AppConfig) -> str:
     """Render the supported AppConfig shape without adding a TOML dependency."""
 
-    lines = [f"default = {_toml_value(config.default)}", ""]
+    lines = [f"default = {_toml_value(config.default)}",
+             f"memory_enabled = {_toml_value(config.memory_enabled)}", ""]
     for name, provider in config.providers.items():
         lines.extend(
             [

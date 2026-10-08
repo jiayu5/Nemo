@@ -16,9 +16,15 @@ from nemo.adapters.tools.filesystem import (
     WriteFileTool,
 )
 from nemo.adapters.tools.search import SearchWorkspaceTool
+from nemo.adapters.memory import FileMemoryStore
+from nemo.adapters.tools.memory import SearchMemoryTool, ReadMemoryTool, SaveMemoryTool, ForgetMemoryTool
+from nemo.adapters.tools.history import SearchSessionsTool, ReadSessionTool
+from nemo.core.memory import MemoryStore
+from nemo.server.repository import Repository
 from nemo.adapters.tools.shell import RunShellTool
 from nemo.adapters.tools.web import FetchUrlTool, WebSearchTool
 from nemo.adapters.httpx_transport import HttpxTransport
+from nemo.config.editor import ConfigEditor
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.errors import ConfigError
@@ -37,7 +43,12 @@ ADAPTERS: dict[str, type[ProtocolAdapter]] = {
 }
 
 
-def build_local_tools() -> tuple[Tool, ...]:
+def build_memory_store(config_editor: ConfigEditor | None = None) -> MemoryStore:
+    return FileMemoryStore(Path.home() / ".nemo" / "memory", settings=config_editor or ConfigEditor())
+
+
+def build_local_tools(*, memory_store: MemoryStore | None = None,
+                      history_repository: Repository | None = None) -> tuple[Tool, ...]:
     """The Phase 1 tool set, in registration order.
 
     Order is not cosmetic: the schemas follow it, and the schemas are part of the
@@ -45,7 +56,10 @@ def build_local_tools() -> tuple[Tool, ...]:
     cannot drift apart.
     """
 
-    return (
+    memory_tools = (SearchMemoryTool(memory_store), ReadMemoryTool(memory_store),
+                    SaveMemoryTool(memory_store), ForgetMemoryTool(memory_store)) if memory_store else ()
+    history_tools = (SearchSessionsTool(history_repository), ReadSessionTool(history_repository)) if history_repository else ()
+    return (*memory_tools, *history_tools,
         SearchWorkspaceTool(),
         ReadFileTool(),
         WriteFileTool(),
@@ -114,8 +128,13 @@ def build_model_client(
 def build_server_application(database_path: Path | str) -> NemoApplication:
     """Compose the production Server application from concrete adapters."""
 
+    repository = SQLiteRepository(database_path)
+    config_editor = ConfigEditor()
+    memory_store = build_memory_store(config_editor)
     return NemoApplication(
-        SQLiteRepository(database_path),
+        repository,
+        memory_store=memory_store,
+        config_editor=config_editor,
         client_factory=build_model_client,
-        tools_factory=build_local_tools,
+        tools_factory=lambda: build_local_tools(memory_store=memory_store, history_repository=repository),
     )

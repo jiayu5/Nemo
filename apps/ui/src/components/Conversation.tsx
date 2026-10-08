@@ -52,7 +52,7 @@ export function Conversation({
       <div className="messages" aria-label="Conversation messages">
         {messages.map((message, index) => (
           <article className={`message ${message.role}`} key={`${message.role}-${index}`}>
-            <span className="role">{message.role}</span>
+            <span className="role">{message.content.startsWith("# Saved memory index (application data)\n") ? "Memory update" : message.role}</span>
             {message.role === "assistant" && message.reasoning_content && (
               <details className="reasoning-block">
                 <summary>Reasoning</summary>
