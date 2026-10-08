@@ -1,12 +1,12 @@
 # Context 组装设计
 
-> 状态：M4a/M4d 与 M7 上下文压缩已实现；向上查找项目说明仍是 TODO T1。
+> 状态：M4a/M4d、M7 上下文压缩与 M8 按需检索工具已实现；向上查找项目说明仍是 TODO T1。
 
 ## 1. 目标与边界
 
 Context Builder 负责决定一次模型调用实际收到哪些消息，同时保证稳定前缀可缓存、Session 历史不被修改、临时运行信息不累积。
 
-`ContextBuilder` 仍只负责稳定前缀、历史和 Reminder 的组装。M7 的 `ContextEngine` 在外层选择历史并按需压缩；它不读取文件、不提供长期 Memory 或检索。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
+`ContextBuilder` 仍只负责稳定前缀、历史和 Reminder 的组装。M7 的 `ContextEngine` 在外层选择历史并按需压缩；M8 的搜索结果作为正常工具消息进入历史，再由 Builder 组装。Core 不读取文件，也不提供长期 Memory。说明文件由 `nemo.prompts.instructions` 读取后作为文本传入 Core。
 
 ## 2. 三层 Context
 
@@ -62,7 +62,7 @@ Reminder 是追加在历史之后的独立 user 消息，遵守三条规则：
 
 ## 7. 后续
 
-T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。检索与长期 Memory 仍属 Phase 2 后续工作。
+T1 将决定项目说明向上查找到 Git 仓库根还是文件系统根。工作区检索见 [M8 设计](workspace-retrieval.md)；长期 Memory 仍属 Phase 2 后续工作。
 
 ## 8. M7 上下文窗口与压缩
 

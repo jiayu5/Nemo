@@ -59,6 +59,10 @@ class ToolRegistry:
                               parameters=t.arguments_type.model_json_schema())
                      for t in self._tools.values())
 
+    def is_read_only(self, name: str) -> bool:
+        tool = self._tools.get(name)
+        return bool(tool and tool.read_only)
+
     def summary_for(self, call: ToolCall) -> str | None:
         """A short, tool-authored description of the call, safe for the trace.
 

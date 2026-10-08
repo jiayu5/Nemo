@@ -115,6 +115,8 @@ Model 草稿可带 `context_window_tokens`（整数或 `null`）与 `response_re
 
 配置了模型上下文窗口且需要压缩时，SSE 另有 `context.compression_started`、`context.compression_completed` 和 `context.compacted`。完成事件报告 Provider 可用的 token 用量；`context.compacted` 的 payload 包含 `covered_messages`、`history_digest` 和脱敏摘要 `summary`，便于检查摘要覆盖范围。压缩调用不计入 Run 的 `max_steps`，但会额外访问 Provider。摘要存于现有事件表，不新增数据库 schema；详见 [Context 设计](../design/context-assembly.md#8-m7-上下文窗口与压缩)。
 
+M8 工作区检索由模型调用 `search_workspace` 工具触发。结果作为普通 `tool` 消息写入 Session 历史；SSE 使用现有 `tool.started`、`tool.completed` 或 `tool.failed` 事件，事件 payload 只包含工具名称、调用 ID、摘要与错误码，不包含检索正文。普通问题不扫描工作区。工具范围和当前轮次窗口限制见 [工作区检索设计](../design/workspace-retrieval.md)。
+
 客户端可用以下任一游标续读：
 
 - 查询参数 `?after=<seq>`；

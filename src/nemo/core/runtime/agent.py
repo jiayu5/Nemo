@@ -4,12 +4,14 @@ from collections.abc import Sequence
 from collections.abc import Callable
 
 from nemo.core.context.builder import ContextBuilder
-from nemo.core.context.compaction import CompactionCheckpoint, ContextEngine, ContextWindow
+from nemo.core.context.compaction import (
+    CompactionCheckpoint, ContextEngine, ContextWindow, estimate_request_tokens,
+)
 from nemo.core.context.reminder import describe, fit_reminders, slot_open, step_budget
 from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import (
     AgentState, Event, Message, Model, ModelReasoningDelta, ModelResponse, ModelTextDelta,
-    ModelUsage, RunResult, RunStatus,
+    ModelUsage, RunResult, RunStatus, ToolError, ToolResult,
 )
 from nemo.core.tools.registry import ToolRegistry
 
@@ -128,6 +130,29 @@ class AgentRuntime:
                     summary = self.tools.summary_for(call)
                     emit(EventType.TOOL_STARTED, tool_call_id=call.id, name=call.name, summary=summary)
                     result = await self.tools.execute(call)
+                    if (self.context_engine and result.error is None
+                            and self.tools.is_read_only(call.name)):
+                        current_user = max(
+                            index for index, message in enumerate(state.messages)
+                            if message.role == "user"
+                        )
+                        current_turn = AgentState(messages=[
+                            *state.messages[current_user:],
+                            Message(role="tool", tool_result=result),
+                        ])
+                        minimum_request = self.context.build(current_turn, self.tools)
+                        # Leave room for an M7 summary and the next step reminder.
+                        if estimate_request_tokens(minimum_request) + 1536 > (
+                            self.context_engine.window.input_limit
+                        ):
+                            result = ToolResult(
+                                tool_call_id=call.id,
+                                error=ToolError(
+                                    code="execution_error",
+                                    message="Tool result exceeds the current context window; "
+                                            "narrow the request or reduce output",
+                                ),
+                            )
                     state.messages.append(Message(role="tool", tool_result=result))
                     emit(EventType.TOOL_FAILED if result.error else EventType.TOOL_COMPLETED,
                          tool_call_id=call.id, name=call.name,

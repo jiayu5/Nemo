@@ -15,6 +15,7 @@ from nemo.adapters.tools.filesystem import (
     ReadFileTool,
     WriteFileTool,
 )
+from nemo.adapters.tools.search import SearchWorkspaceTool
 from nemo.adapters.tools.shell import RunShellTool
 from nemo.adapters.tools.web import FetchUrlTool, WebSearchTool
 from nemo.adapters.httpx_transport import HttpxTransport
@@ -45,6 +46,7 @@ def build_local_tools() -> tuple[Tool, ...]:
     """
 
     return (
+        SearchWorkspaceTool(),
         ReadFileTool(),
         WriteFileTool(),
         EditFileTool(),

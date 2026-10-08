@@ -41,6 +41,7 @@ class PromptShapeTests(unittest.TestCase):
                 "stay_in_scope",
                 "communication",
                 "instruction_files",
+                "retrieved_source_data",
             ),
         )
 

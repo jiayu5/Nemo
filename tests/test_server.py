@@ -10,6 +10,7 @@ import httpx
 from nemo.adapters.persistence import SQLiteRepository
 from nemo.server.errors import ActiveRunError
 from nemo.adapters.tools.filesystem import WriteFileTool
+from nemo.adapters.tools.search import SearchWorkspaceTool
 from nemo.config.editor import ConfigEditor
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
@@ -124,6 +125,43 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(model.requests), 4)
         self.assertIn("Old request was about A.", model.requests[-1].messages[1].content)
         self.assertEqual(len(service.session_messages(session["session_id"])), 6)
+
+    async def test_search_result_is_persisted_and_visible_on_next_run(self):
+        (self.root / "guide.md").write_text(
+            "Unique source excerpt about invoice_total\n", encoding="utf-8"
+        )
+        model = FakeModel([
+            ModelResponse(tool_calls=(ToolCall(
+                id="search-1", name="search_workspace",
+                arguments={"query": "invoice_total"},
+            ),)),
+            ModelResponse(content="Found guide.md"),
+            ModelResponse(content="It describes invoice_total"),
+        ])
+        service = NemoApplication(
+            SQLiteRepository(self.root / "retrieval.sqlite"),
+            client_factory=lambda **_: model,
+            tools_factory=lambda: (SearchWorkspaceTool(),),
+        )
+        self.services.append(service)
+        session = service.repository.create_session(
+            session_id="retrieval-session", workspace=self.root, model=None,
+            approval_mode=ApprovalMode.FULL.value,
+            user_instructions=None, project_instructions=None,
+        )
+        started = service.start_run(session["session_id"], prompt="Find guide", max_steps=2)
+        self.assertEqual((await self.wait_terminal(service, started["run_id"]))["status"], "completed")
+        self.assertNotIn("Unique source excerpt", str(model.requests[0].messages))
+        self.assertIn("Unique source excerpt", str(model.requests[1].messages))
+        saved = service.session_messages(session["session_id"])
+        self.assertEqual(saved[2].role, "tool")
+        self.assertIn("Unique source excerpt", saved[2].tool_result.output)
+        events = service.events_after(started["run_id"], 0)
+        self.assertIn(EventType.TOOL_COMPLETED, [event.type for event in events])
+        self.assertNotIn("Unique source excerpt", str(events))
+        followup = service.start_run(session["session_id"], prompt="What did it say?", max_steps=1)
+        self.assertEqual((await self.wait_terminal(service, followup["run_id"]))["status"], "completed")
+        self.assertIn("Unique source excerpt", str(model.requests[2].messages))
 
     async def test_http_session_run_and_sse_reconnect(self):
         service, _ = self.service([ModelResponse(content="done")])

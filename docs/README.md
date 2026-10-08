@@ -27,6 +27,7 @@
 | M5 · React UI | 已完成 | 2026-09-21 至 2026-09-22 | [M5](milestones/M5-react-ui.md) |
 | M6 · macOS App | 已完成 | 2026-09-23 | [M6](milestones/M6-macos-app.md) |
 | M7 · 上下文窗口与压缩 | 已完成 | 2026-09-24 | [M7](milestones/M7-context-compaction.md) |
+| M8 · 工作区检索 | 已完成 | 2026-09-24 | [M8](milestones/M8-workspace-retrieval.md) |
 
 ## 现行参考
 
@@ -38,6 +39,7 @@
 | 文档 | 状态 | 主题 |
 |---|---|---|
 | [context-assembly](design/context-assembly.md) | 已实现；T1 待定 | 稳定前缀、项目说明、Reminder 与上下文压缩 |
+| [workspace-retrieval](design/workspace-retrieval.md) | 已实现；embedding 待评估 | 模型按需搜索、词法排序、短预览与历史复用 |
 | [cli-and-approval](design/cli-and-approval.md) | 已实现 | Session、三档审批、终端交互与脱敏 |
 | [server-and-persistence](design/server-and-persistence.md) | 已实现 | Server、SQLite、SSE 与生命周期 |
 | [model-streaming](design/model-streaming.md) | 已实现 | 模型增量、工具调用组装、事件回放与客户端显示 |
