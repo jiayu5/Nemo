@@ -182,6 +182,7 @@ describe("App", () => {
     delete responses["/api/sessions/session-1/messages"];
     delete responses["/api/sessions/session-1/runs"];
     delete responses["/api/runs/run-1/trace"];
+    delete responses["/api/runs/run-1/cancel"];
     runStartResponse = null;
     runStartStatus = 200;
     vi.unstubAllGlobals();
@@ -577,5 +578,70 @@ describe("App", () => {
     )).toHaveLength(2));
     await waitFor(() => expect(screen.queryByRole("button", { name: "Stop" })).not.toBeInTheDocument());
     expect(urls).toEqual([]);
+  });
+
+  it("stops the running turn from the composer send position", async () => {
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 1,
+    }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [{
+      run_id: "run-1", session_id: "session-1", status: "running",
+    }];
+    responses["/api/runs/run-1/trace"] = {
+      run: { run_id: "run-1", session_id: "session-1", status: "running" },
+      duration_ms: null, steps: [], model_calls: [], tool_calls: [], events: [],
+    };
+    responses["/api/runs/run-1/cancel"] = { status: "cancelling" };
+
+    render(<App />);
+    const stop = await screen.findByRole("button", { name: "Stop" });
+    expect(stop.closest(".composer-toolbar")).not.toBeNull();
+    expect(stop.closest(".conversation-title")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Run task" })).toBeNull();
+
+    fireEvent.click(stop);
+    await waitFor(() =>
+      expect(fetch).toHaveBeenCalledWith(
+        "/api/runs/run-1/cancel",
+        expect.objectContaining({ method: "POST" }),
+      ),
+    );
+  });
+
+  it("folds reasoning and tool activity into one collapsed block per turn", async () => {
+    responses["/api/sessions"] = [{
+      session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "2026-09-21T00:00:00Z",
+      updated_at: "2026-09-21T00:00:00Z", message_count: 4,
+    }];
+    responses["/api/sessions/session-1/messages"] = [
+      { role: "user", content: "Inspect the file", tool_calls: [], tool_result: null },
+      { role: "assistant", content: "", reasoning_content: "Look for the file",
+        tool_calls: [
+        { id: "call-1", name: "read_file", arguments: { path: "a.txt" } }],
+        tool_result: null },
+      { role: "tool", content: "", tool_calls: [], tool_result: {
+        tool_call_id: "call-1", output: { text: "hello" }, error: null } },
+      { role: "assistant", content: "The file says hello.",
+        reasoning_content: "Now answer", tool_calls: [], tool_result: null },
+    ];
+    responses["/api/sessions/session-1/runs"] = [];
+
+    render(<App />);
+    const summary = await screen.findByText("Reasoning · 1 tool call");
+    const blocks = screen.getByLabelText("Conversation messages")
+      .querySelectorAll("details.turn-block");
+    expect(blocks).toHaveLength(1);
+    expect((blocks[0] as HTMLDetailsElement).open).toBe(false);
+    expect(summary.closest("details")).toBe(blocks[0]);
+    expect(blocks[0]).toHaveTextContent("Look for the file");
+    expect(blocks[0]).toHaveTextContent("Requested read_file");
+    expect(blocks[0]).toHaveTextContent("read_file · result");
+    expect(blocks[0]).toHaveTextContent("Now answer");
+    expect(blocks[0]).not.toHaveTextContent("The file says hello.");
+    expect(screen.getByText("The file says hello.")).toBeInTheDocument();
   });
 });

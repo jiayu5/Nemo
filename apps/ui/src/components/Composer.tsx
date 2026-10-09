@@ -8,12 +8,13 @@ interface Props {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSubmit: FormEventHandler<HTMLFormElement>;
+  onStop: () => void;
   onModeChange: (mode: ApprovalMode) => void;
   onModelChange: (model: string) => void;
 }
 
 export function Composer({
-  selected, models, activeRun, prompt, onPromptChange, onSubmit, onModeChange, onModelChange,
+  selected, models, activeRun, prompt, onPromptChange, onSubmit, onStop, onModeChange, onModelChange,
 }: Props) {
   const actualModels = models.filter((model) => model.kind === "model");
   const selectedOption = models.find((model) => model.selection === selected?.model);
@@ -74,14 +75,26 @@ export function Composer({
               ))}
             </select>
           </label>
-          <button
-            className="composer-send"
-            type="submit"
-            aria-label="Run task"
-            disabled={!selected || !prompt.trim() || Boolean(activeRun)}
-          >
-            {activeRun ? <span className="running-spinner" /> : "↑"}
-          </button>
+          {activeRun ? (
+            <button
+              className="composer-send composer-stop"
+              type="button"
+              aria-label="Stop"
+              title="Stop the running turn"
+              onClick={onStop}
+            >
+              <span className="stop-glyph" aria-hidden="true" />
+            </button>
+          ) : (
+            <button
+              className="composer-send"
+              type="submit"
+              aria-label="Run task"
+              disabled={!selected || !prompt.trim()}
+            >
+              ↑
+            </button>
+          )}
         </div>
       </div>
     </form>
