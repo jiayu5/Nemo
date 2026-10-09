@@ -75,7 +75,7 @@ def create_app(
             if owned_service:
                 await agent_service.shutdown()
 
-    app = FastAPI(title="Nemo Server", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Nemo Server", version="0.2.0", lifespan=lifespan)
     if desktop_token is not None:
         install_desktop_access(app, desktop_token)
 

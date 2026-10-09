@@ -1,11 +1,11 @@
 """Loading the instruction files that go into the stable prefix.
 
-Two files share one name and are told apart by *scope*:
+Instruction files share one name and are told apart by *scope*:
 
 - ``~/.nemo/AGENTS.md`` -- how the user wants this agent to behave everywhere.
-- ``<workspace>/AGENTS.md`` -- what this particular project expects.
+- Git-root-to-workspace ``AGENTS.md`` files -- what this project expects.
 
-Both are optional and both are snapshotted once per session. Re-reading them
+Both scopes are optional and snapshotted once per session. Re-reading them
 every turn would make the stable prefix drift, throwing away the provider's
 prompt cache and handing the model a different set of rules from one turn to
 the next.
@@ -61,6 +61,36 @@ def load_project_instructions(
     *,
     filename: str = DEFAULT_INSTRUCTIONS_FILENAME,
 ) -> str | None:
-    """The workspace's own instructions, if it has any."""
+    """Snapshot root-to-workspace rules, stopping at the nearest Git root.
 
-    return load_instructions(Path(workspace) / filename)
+    A .git file also marks worktrees/submodules. Outside a repository, only the
+    workspace itself applies. Instruction symlinks may not leave this root.
+    """
+
+    if Path(filename).name != filename:
+        raise ValueError("instruction filename must be a single path component")
+    workspace = Path(workspace).expanduser().resolve()
+    chain = [workspace, *workspace.parents]
+    root_index = next((i for i, folder in enumerate(chain)
+                       if (folder / ".git").is_dir() or (folder / ".git").is_file()), None)
+    folders = list(reversed(chain[:root_index + 1])) if root_index is not None else [workspace]
+    root = folders[0]
+    loaded = []
+    seen = set()
+    for folder in folders:
+        path = folder / filename
+        try:
+            resolved = path.resolve()
+            if not resolved.is_relative_to(root) or resolved in seen:
+                continue
+        except (OSError, RuntimeError):
+            continue
+        text = load_instructions(path)
+        if text:
+            seen.add(resolved)
+            loaded.append((path.relative_to(root).as_posix(), text))
+    if not loaded:
+        return None
+    if len(loaded) == 1 and folders[-1] / filename == root / loaded[0][0]:
+        return loaded[0][1]
+    return "\n\n".join(f"## {path}\n{text}" for path, text in loaded)

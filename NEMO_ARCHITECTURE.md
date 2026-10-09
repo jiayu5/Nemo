@@ -151,7 +151,7 @@ Runtime 在流式增量结束后仍取得完整 `ModelResponse`，用它完成�
 3. Session 历史；
 4. 本轮临时 Reminder。
 
-Reminder 只添加到当前请求，不写入 Session，避免随历史累积或破坏稳定前缀。当前只读取 workspace 根部的项目说明；向仓库根逐层收集是待办 T1。
+Reminder 只添加到当前请求，不写入 Session，避免随历史累积或破坏稳定前缀。项目说明从最近 Git 根到 workspace 逐层收集并快照；非 Git 工作区只加载自身。具体规则见 [Context 设计](docs/design/context-assembly.md#3-稳定前缀)。
 
 M7 加入可选的模型上下文窗口。超过输入规划量时，Context Engine 调用当前模型压缩较早的完整对话轮次，并把摘要与近期原文送入正常模型请求；原始会话历史保持追加式。压缩检查点保存在现有 Run 事件或直连 CLI transcript 中，复用前校验原始历史。估算值不代表精确 token 数或账户余额，压缩也会产生额外模型调用。详细规则见 [Context 组装设计](docs/design/context-assembly.md#8-m7-上下文窗口与压缩)。
 

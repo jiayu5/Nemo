@@ -4,6 +4,8 @@ Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台�
 
 Phase 1 的 M1–M6 与 Phase 2 的 M7–M9 已实现，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
 
+macOS Apple Silicon 可从 [GitHub Release](https://github.com/jiayu5/Nemo/releases/latest) 下载打包应用；当前版本为 `v0.2.0`。
+
 ## 快速开始
 
 要求：Conda、Node.js/npm，以及 Python 3.12 环境。

@@ -50,11 +50,11 @@ PATH="$HOME/.cargo/bin:$PATH" npm --prefix apps/ui run desktop:dev
 PATH="$HOME/.cargo/bin:$PATH" npm --prefix apps/ui run desktop:build
 ```
 
-生成的 sidecar 与 Rust `target/` 不入 Git；`Cargo.lock`、npm lock、配置和源图标入 Git。当前验证范围是 Apple Silicon macOS；Intel Mac 需在对应目标架构下重新构建。构建产物尚未签名或公证，不作为公开发布包。
+生成的 sidecar 与 Rust `target/` 不入 Git；`Cargo.lock`、npm lock、配置和源图标入 Git。当前验证范围是 Apple Silicon macOS；Intel Mac 需在对应目标架构下重新构建。GitHub Release 使用 ZIP 分发 Apple Silicon 应用；构建产物尚未做 Developer ID 签名或 Apple 公证，首次打开可能需要在 macOS 隐私与安全性设置中手动允许。
 
 ## 验证与遗留
 
 - Python：桌面访问拒绝无令牌、错误令牌与不允许的 Origin；普通 Server 不变。
 - 前端：桌面 HTTP 与 SSE 均携带令牌，跨网络片段解析与终态处理正常；新 Session 使用桌面壳上报的默认工作目录。
 - 打包：PyInstaller 二进制可启动，随机端口返回正确访问状态；Tauri `cargo check` 与 `.app` 构建通过。
-- 待后续确认：应用签名/公证、Intel 架构产物、真实 Provider 端到端试用，以及安装包交付方式。
+- 待后续确认：应用签名/公证、Intel 架构产物、真实 Provider 端到端试用，。

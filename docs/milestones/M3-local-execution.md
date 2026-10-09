@@ -48,5 +48,5 @@ M3a 完成时 96 个测试通过；加入 M3b 后全套 204 个测试通过。We
 
 - workspace 和审批都不是 Sandbox；操作系统隔离属于 Phase 3。
 - 交互式审批在 M4b 完成。
-- Bing HTML 搜索相关性不稳定，替换搜索 API 记录为 TODO T2。
+- 当时因 Bing HTML 搜索相关性问题记录过替换 API 的待办；该待办已于 2026-10-09 取消，当前继续使用 Bing，见 [Web 工具设计](../design/web-tools.md)。
 - JavaScript 页面、登录态、浏览器交互和下载不在当前 Web 工具范围。

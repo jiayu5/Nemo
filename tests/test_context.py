@@ -231,6 +231,36 @@ class PrefixTests(unittest.TestCase):
             (workspace / "AGENTS.md").write_text("rules", encoding="utf-8")
             self.assertEqual(load_project_instructions(workspace), "rules")
 
+    def test_ancestor_instructions_stop_at_nearest_git_root_in_order(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            root = parent / "repo"
+            workspace = root / "apps" / "ui"
+            workspace.mkdir(parents=True)
+            (parent / "AGENTS.md").write_text("unrelated rules")
+            (root / ".git").mkdir()
+            (root / "AGENTS.md").write_text("root rules")
+            (root / "apps" / "AGENTS.md").write_text("app rules")
+            (workspace / "AGENTS.md").write_text("local rules")
+            text = load_project_instructions(workspace)
+            self.assertNotIn("unrelated", text)
+            self.assertLess(text.index("root rules"), text.index("app rules"))
+            self.assertLess(text.index("app rules"), text.index("local rules"))
+            self.assertIn("apps/ui/AGENTS.md", text)
+            # Nested repositories and worktrees are also a boundary.
+            (root / "apps" / ".git").write_text("gitdir: elsewhere")
+            self.assertNotIn("root rules", load_project_instructions(workspace))
+
+    def test_non_git_workspace_does_not_load_parents_or_external_symlinks(self):
+        with tempfile.TemporaryDirectory() as directory:
+            parent = Path(directory)
+            workspace = parent / "workspace"
+            workspace.mkdir()
+            (parent / "AGENTS.md").write_text("unrelated rules")
+            self.assertIsNone(load_project_instructions(workspace))
+            (workspace / "AGENTS.md").symlink_to(parent / "AGENTS.md")
+            self.assertIsNone(load_project_instructions(workspace))
+
 
 class ReminderInjectionTests(unittest.TestCase):
     def state(self):
