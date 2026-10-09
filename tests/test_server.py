@@ -11,6 +11,8 @@ from nemo.adapters.persistence import SQLiteRepository
 from nemo.server.errors import ActiveRunError
 from nemo.adapters.tools.filesystem import WriteFileTool
 from nemo.adapters.tools.search import SearchWorkspaceTool
+from nemo.adapters.skills import FileSkillCatalog
+from nemo.bootstrap import build_skill_tools
 from nemo.config.editor import ConfigEditor
 from nemo.config.loader import load_config
 from nemo.config.secrets import SecretLoader
@@ -36,16 +38,71 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         for service in reversed(self.services):
             await service.shutdown()
 
-    def service(self, responses, *, tools=(), approval_timeout=1.0):
+    def service(self, responses, *, tools=(), approval_timeout=1.0, skills=False):
         model = FakeModel(list(responses))
         service = NemoApplication(
             SQLiteRepository(self.root / f"db-{len(self.services)}.sqlite"),
             client_factory=lambda **_: model,
             tools_factory=lambda: tuple(tools),
+            skill_catalog_factory=(lambda workspace: FileSkillCatalog(workspace, self.root / "skills")) if skills else None,
+            skill_tools_factory=build_skill_tools if skills else None,
             approval_timeout_seconds=approval_timeout,
         )
         self.services.append(service)
         return service, model
+
+    async def test_skill_directory_freezes_and_resume_refreshes_without_schema_change(self):
+        folder = self.root / ".nemo" / "skills" / "review"
+        folder.mkdir(parents=True)
+        path = folder / "SKILL.md"
+        path.write_text("---\nname: review\ndescription: Original description\n---\nRead the diff")
+        service, model = self.service([ModelResponse(content="first"), ModelResponse(content="second"),
+                                       ModelResponse(content="third")], skills=True)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        sid = session["session_id"]
+        first = service.start_run(sid, prompt="one", max_steps=2)
+        await self.wait_terminal(service, first["run_id"])
+        path.write_text(path.read_text().replace("Original description", "Updated description"))
+        second = service.start_run(sid, prompt="two", max_steps=2)
+        await self.wait_terminal(service, second["run_id"])
+        self.assertEqual(model.requests[0].messages[0], model.requests[1].messages[0])
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service=service)), base_url="http://test") as client:
+            response = await client.post(f"/sessions/{sid}/resume")
+            self.assertEqual(response.status_code, 200)
+            missing = await client.post("/sessions/missing/resume")
+            self.assertEqual(missing.status_code, 404)
+        third = service.start_run(sid, prompt="three", max_steps=2)
+        await self.wait_terminal(service, third["run_id"])
+        self.assertIn("Updated description", model.requests[-1].messages[0].content)
+        self.assertNotIn("Read the diff", model.requests[-1].messages[0].content)
+        columns = {row[1] for row in sqlite3.connect(self.root / "db-0.sqlite").execute("PRAGMA table_info(sessions)")}
+        self.assertNotIn("skills_catalog", columns)
+
+    async def test_skill_resume_keeps_active_run_snapshot_and_restart_discovers_new_files(self):
+        folder = self.root / ".nemo" / "skills" / "review"
+        folder.mkdir(parents=True)
+        path = folder / "SKILL.md"
+        path.write_text("---\nname: review\ndescription: Before restart\n---\nOriginal workflow")
+        service, model = self.service([ModelResponse(content="done")], skills=True)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        sid = session["session_id"]
+        run = service.start_run(sid, prompt="one", max_steps=2)
+        path.write_text(path.read_text().replace("Before restart", "After restart"))
+        service.resume_session(sid)
+        await self.wait_terminal(service, run["run_id"])
+        self.assertIn("Before restart", model.requests[0].messages[0].content)
+        await service.shutdown()
+        self.services.remove(service)
+        restarted_model = FakeModel([ModelResponse(content="restored")])
+        restarted = NemoApplication(SQLiteRepository(self.root / "db-0.sqlite"),
+            client_factory=lambda **_: restarted_model,
+            skill_catalog_factory=lambda workspace: FileSkillCatalog(workspace, self.root / "skills"),
+            skill_tools_factory=build_skill_tools)
+        self.services.append(restarted)
+        run = restarted.start_run(sid, prompt="resume", max_steps=2)
+        await self.wait_terminal(restarted, run["run_id"])
+        self.assertIn("After restart", restarted_model.requests[0].messages[0].content)
+        self.assertIn("one", str(restarted_model.requests[0].messages))
 
     @staticmethod
     def config():

@@ -140,6 +140,7 @@ let runStartStatus = 200;
 
 describe("App", () => {
   beforeEach(() => {
+    HTMLDialogElement.prototype.showModal = function () { this.open = true; };
     vi.stubGlobal(
       "EventSource",
       class {
@@ -157,7 +158,11 @@ describe("App", () => {
           return new Response(null, { status: 204 });
         }
         const body =
-          init?.method === "DELETE" && path === "/api/settings/providers/demo"
+          init?.method === "POST" && path.endsWith("/resume")
+            ? (responses["/api/sessions"] as Array<{ session_id: string }>).find(
+                (session) => path === `/api/sessions/${session.session_id}/resume`,
+              )
+            : init?.method === "DELETE" && path === "/api/settings/providers/demo"
             ? { status: "deleted", provider_id: "demo", removed_models: ["demo-model"], default: "backup" }
             : init?.method === "POST" && path.endsWith("/runs") && runStartResponse
             ? runStartResponse
@@ -198,6 +203,23 @@ describe("App", () => {
     ]);
   });
 
+  it("opens connections as a dialog while keeping run activity in place", async () => {
+    render(<App />);
+    await screen.findByText("Server online");
+    const activity = screen.getByRole("complementary", { name: "Run activity" });
+    expect(screen.queryByRole("tablist", { name: "Inspector view" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connections" }));
+    const dialog = await screen.findByRole("dialog", { name: "Connections" });
+    expect(dialog).toHaveAttribute("open");
+    expect(activity).toBe(screen.getByRole("complementary", { name: "Run activity" }));
+    expect(activity.querySelector(".settings-panel")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Close" }));
+    expect(screen.queryByRole("dialog", { name: "Connections" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Connections" }));
+    fireEvent(screen.getByRole("dialog", { name: "Connections" }), new Event("cancel"));
+    expect(screen.queryByRole("dialog", { name: "Connections" })).toBeNull();
+  });
+
   it("requires confirmation before deleting a session", async () => {
     responses["/api/sessions"] = [{
       session_id: "session-1", workspace: "/workspace", model: "chat", approval_mode: "ask",
@@ -207,6 +229,9 @@ describe("App", () => {
     responses["/api/sessions/session-1/runs"] = [];
     render(<App />);
     fireEvent.click(await screen.findByRole("button", { name: "Delete session session-" }));
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/sessions/session-1/resume", expect.objectContaining({ method: "POST" }),
+    );
     expect(fetch).not.toHaveBeenCalledWith("/api/sessions/session-1", expect.objectContaining({ method: "DELETE" }));
     fireEvent.click(screen.getByRole("button", { name: "Delete session" }));
     await waitFor(() => expect(fetch).toHaveBeenCalledWith(

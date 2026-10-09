@@ -2,6 +2,9 @@
 
 from collections.abc import Callable
 from typing import Any
+from pathlib import Path
+from nemo.core.skills import SkillCatalog, SkillManagementStore
+from nemo.server.skills import SkillsService
 
 from nemo.core.memory import MemoryStore, memory_messages
 from nemo.config.loader import load_config
@@ -26,6 +29,9 @@ class NemoApplication:
         client_factory: Callable[..., Any],
         tools_factory: Callable[[], tuple[Any, ...]] = tuple,
         memory_store: MemoryStore | None = None,
+        skill_catalog_factory: Callable[[Path], SkillCatalog] | None = None,
+        skill_management_store: SkillManagementStore | None = None,
+        skill_tools_factory: Callable[[SkillCatalog], tuple[Any, ...]] | None = None,
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
         secret_loader_factory: Callable[[], Any] = SecretLoader,
@@ -34,7 +40,9 @@ class NemoApplication:
         self.repository = repository
         self.memory_store = memory_store
         self.memories = MemoryService(repository, memory_store)
-        self.sessions = SessionService(repository, config_loader=config_loader)
+        self.skills = SkillsService(repository, skill_management_store)
+        self.sessions = SessionService(repository, config_loader=config_loader,
+                                       skill_catalog_factory=skill_catalog_factory)
         self.catalog = CatalogService(
             client_factory=client_factory,
             config_loader=config_loader,
@@ -44,6 +52,8 @@ class NemoApplication:
             repository,
             client_factory=client_factory,
             tools_factory=tools_factory,
+            skill_catalog_loader=self.sessions.skills,
+            skill_tools_factory=skill_tools_factory,
             memory_store=memory_store,
             approval_timeout_seconds=approval_timeout_seconds,
             config_loader=config_loader,
@@ -69,6 +79,9 @@ class NemoApplication:
 
     def get_session(self, session_id: str) -> dict[str, Any]:
         return self.sessions.get(session_id)
+
+    def resume_session(self, session_id: str) -> dict[str, Any]:
+        return self.sessions.resume(session_id)
 
     def delete_session(self, session_id: str) -> None:
         self.sessions.delete(session_id)

@@ -4,7 +4,7 @@
 
 ## 1. 目标与边界
 
-Server 让 CLI、React UI 和未来 Desktop 共享一个长期运行的 Agent 后端。它拥有 Session、Run、审批、事件和 SQLite 生命周期，但只编排现有 Core Runtime。
+Server 让 CLI、React UI 和 Desktop 共享一个长期运行的 Agent 后端。它拥有 Session、Run、审批、事件和 SQLite 生命周期，但只编排现有 Core Runtime。
 
 Server 不实现第二套 Loop，不让客户端直接访问 SQLite，也不把 Prompt 或上层命令保存为临时 JSON 文件。
 

@@ -75,14 +75,17 @@ Model 草稿可带 `context_window_tokens`（整数或 `null`）与 `response_re
 
 | 方法 | 路径 | 请求 | 结果 |
 |---|---|---|---|
-| `POST` | `/sessions` | `workspace`、可选 `model`、`approval_mode` | `201` 创建 Session，并快照说明文件 |
+| `POST` | `/sessions` | `workspace`、可选 `model`、`approval_mode` | `201` 创建 Session，快照说明文件并加载技能目录 |
 | `GET` | `/sessions` | — | 按更新时间列出 Session |
 | `GET` | `/sessions/{session_id}` | — | Session 元数据和消息数量 |
+| `POST` | `/sessions/{session_id}/resume` | — | 返回 Session 元数据并刷新闲置会话技能目录；活动 Run 保持原目录；缺失为 `404`，技能目录超限为 `422` |
 | `DELETE` | `/sessions/{session_id}` | — | `204` 删除 Session 及其消息、Run、事件等历史；不存在返回 `404`，有活动 Run 返回 `409` |
 | `PATCH` | `/sessions/{session_id}` | 可选 `model`、`approval_mode` | 修改后续 Run 的设置 |
 | `PUT` | `/sessions/{session_id}/model` | `{"model":"selection"}` | 校验并切换后续 Run 的模型 |
 | `GET` | `/sessions/{session_id}/messages` | — | 返回脱敏后的消息历史 |
 | `GET` | `/sessions/{session_id}/runs` | — | 返回该 Session 的 Run |
+
+Skills 目录只缓存在当前 Server 内存，详细加载语义见 [Skills 参考](skills.md)。
 
 `workspace` 必须是 Server 主机上已经存在的目录。`approval_mode` 为 `ask`、`auto` 或 `full`。
 
@@ -153,3 +156,7 @@ Server 仅允许绑定 `127.0.0.1`、`localhost` 或 `::1`。命令行 Server �
 ## M9 Memory 管理
 
 用户/项目文件记忆、管理 HTTP API、模型召回工具和来源读取以 [Memory 参考](memory.md) 为权威来源。Session 的消息列表可能包含带 `Saved memory index (application data)` 标识的 assistant 数据消息，它记录记忆索引或开关变更，不是模型生成的回复。
+
+## Skills 管理
+
+`GET /skills`、`GET /skills/detail` 查询当前安装目录与正文；`POST /skills/preview` 预检 Markdown，`POST /skills/import` 创建新技能。具体字段、范围、错误与会话生效语义以 [Skills 参考](skills.md#管理界面与导入)为准。管理查询和导入不刷新 Session 的技能目录。

@@ -114,6 +114,9 @@ class FakeServerClient:
     async def get_session(self, session_id):
         return self.session
 
+    async def resume_session(self, session_id):
+        return self.session
+
     async def create_session(self, *, workspace, model, approval_mode):
         self.session = {
             **self.session,

@@ -1,15 +1,17 @@
 import { useState } from "react";
+import { SkillsPanel } from "./components/SkillsPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { Conversation } from "./components/Conversation";
 import { InspectorPanel } from "./components/InspectorPanel";
-import type { InspectorView } from "./components/InspectorPanel";
+import { ConnectionsDialog } from "./components/ConnectionsDialog";
 import { SessionSidebar } from "./components/SessionSidebar";
 import { useNemoWorkspace } from "./hooks/useNemoWorkspace";
 
 export default function App() {
   const workspace = useNemoWorkspace();
   const [showMemory, setShowMemory] = useState(false);
-  const [inspectorView, setInspectorView] = useState<InspectorView>("activity");
+  const [showSkills, setShowSkills] = useState(false);
+  const [showConnections, setShowConnections] = useState(false);
 
   return (
     <div className="app-shell">
@@ -27,9 +29,10 @@ export default function App() {
         <button
           className="settings-toggle"
           type="button"
-          onClick={() => setInspectorView("connections")}
+          onClick={() => setShowConnections(true)}
         >Connections</button>
         <button className="settings-toggle" type="button" onClick={() => setShowMemory(true)}>Memories</button>
+        <button className="settings-toggle" type="button" onClick={() => setShowSkills(true)}>Skills</button>
         <span className={`server-pill ${workspace.serverOnline ? "online" : "offline"}`}>
           <i /> {workspace.serverOnline ? "Server online" : "Server offline"}
         </span>
@@ -65,16 +68,17 @@ export default function App() {
           onModelChange={(model) => void workspace.updateModel(model)}
         />
         <InspectorPanel
-          view={inspectorView}
-          onViewChange={setInspectorView}
           runs={workspace.runs}
           trace={workspace.trace}
           events={workspace.events}
-          settings={workspace.providerSettings}
           onSelectRun={(run) => void workspace.selectRun(run)}
-          onSettingsSaved={workspace.refreshConfiguration}
         />
       </main>
+
+      {showConnections && <ConnectionsDialog settings={workspace.providerSettings}
+        onSaved={workspace.refreshConfiguration} onClose={() => setShowConnections(false)} />}
+
+      {showSkills && <SkillsPanel key={workspace.selected?.session_id} session={workspace.selected} onClose={() => setShowSkills(false)} />}
 
       {showMemory && <MemoryPanel key={workspace.selected?.session_id} session={workspace.selected} onClose={() => setShowMemory(false)} />}
 

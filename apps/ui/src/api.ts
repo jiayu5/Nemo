@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
-  ApprovalMode,
+  ApprovalMode, InstalledSkills, SkillDetail,
   MemoryState, MemoryDraft, MemoryEntry,
   Message,
   ModelOption,
@@ -100,6 +100,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  skills: (sessionId: string | null) => request<InstalledSkills>(
+    `/skills${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`),
+  skillDetail: (skillId: string, sessionId: string | null) => request<SkillDetail>(
+    `/skills/detail?skill_id=${encodeURIComponent(skillId)}${sessionId ? `&session_id=${encodeURIComponent(sessionId)}` : ""}`),
   memories: (sessionId: string) => request<MemoryState>(`/sessions/${encodeURIComponent(sessionId)}/memories`),
   saveMemory: (sessionId: string, draft: MemoryDraft) => request<MemoryEntry>(
     `/sessions/${encodeURIComponent(sessionId)}/memories`, { method: "POST", body: JSON.stringify(draft) }),
@@ -117,6 +121,8 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ workspace, model, approval_mode: approvalMode }),
     }),
+  resumeSession: (sessionId: string) =>
+    request<Session>(`/sessions/${encodeURIComponent(sessionId)}/resume`, { method: "POST" }),
   deleteSession: (sessionId: string) =>
     request<void>(`/sessions/${encodeURIComponent(sessionId)}`, { method: "DELETE" }),
   messages: (sessionId: string) =>

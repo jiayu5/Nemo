@@ -20,6 +20,9 @@ from nemo.adapters.memory import FileMemoryStore
 from nemo.adapters.tools.memory import SearchMemoryTool, ReadMemoryTool, SaveMemoryTool, ForgetMemoryTool
 from nemo.adapters.tools.history import SearchSessionsTool, ReadSessionTool
 from nemo.core.memory import MemoryStore
+from nemo.core.skills import SkillCatalog
+from nemo.adapters.skills import FileSkillCatalog, FileSkillManagementStore
+from nemo.adapters.tools.skills import ListSkillsTool, ReadSkillTool, ReadSkillResourceTool
 from nemo.server.repository import Repository
 from nemo.adapters.tools.shell import RunShellTool
 from nemo.adapters.tools.web import FetchUrlTool, WebSearchTool
@@ -41,6 +44,18 @@ from nemo.server.application import NemoApplication
 ADAPTERS: dict[str, type[ProtocolAdapter]] = {
     OpenAICompatibleAdapter.protocol: OpenAICompatibleAdapter,
 }
+
+
+BUILTIN_SKILLS_ROOT = Path(__file__).resolve().parent / "prompts" / "skills"
+
+
+def build_skill_catalog(workspace: Path) -> SkillCatalog:
+    return FileSkillCatalog(workspace, Path.home() / ".nemo" / "skills",
+                            builtin_root=BUILTIN_SKILLS_ROOT)
+
+
+def build_skill_tools(catalog: SkillCatalog) -> tuple[Tool, ...]:
+    return (ListSkillsTool(catalog), ReadSkillTool(catalog), ReadSkillResourceTool(catalog))
 
 
 def build_memory_store(config_editor: ConfigEditor | None = None) -> MemoryStore:
@@ -133,6 +148,10 @@ def build_server_application(database_path: Path | str) -> NemoApplication:
     memory_store = build_memory_store(config_editor)
     return NemoApplication(
         repository,
+        skill_catalog_factory=build_skill_catalog,
+        skill_management_store=FileSkillManagementStore(
+            Path.home() / ".nemo" / "skills", builtin_root=BUILTIN_SKILLS_ROOT),
+        skill_tools_factory=build_skill_tools,
         memory_store=memory_store,
         config_editor=config_editor,
         client_factory=build_model_client,

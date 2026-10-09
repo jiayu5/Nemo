@@ -25,7 +25,7 @@ from nemo.server.errors import (
 )
 from nemo.server.repository import TERMINAL_STATUSES
 from nemo.server.schemas import (
-    ActionResponse,
+    ActionResponse, SkillImportRequest,
     MemorySaveRequest, MemoryForgetRequest, MemorySettingsRequest,
     ApprovalAnswerRequest,
     CreateRunRequest,
@@ -124,6 +124,32 @@ def create_app(
         memory_action(lambda: agent_service.memories.require_store().set_enabled(body.enabled))
         return {"enabled": body.enabled}
 
+    def skill_action(action):
+        try:
+            return action()
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=409, detail=exc.public_message) from None
+        except Exception:
+            raise HTTPException(status_code=500, detail="could not access skill storage") from None
+
+    @app.get("/skills")
+    def installed_skills(session_id: str | None = None) -> dict:
+        return skill_action(lambda: agent_service.skills.list(session_id))
+
+    @app.get("/skills/detail")
+    def skill_detail(skill_id: str, session_id: str | None = None) -> dict:
+        return skill_action(lambda: agent_service.skills.detail(session_id, skill_id))
+
+    @app.post("/skills/preview")
+    def preview_skill(body: SkillImportRequest) -> dict:
+        return skill_action(lambda: agent_service.skills.preview(body.session_id, body.scope, body.content))
+
+    @app.post("/skills/import", status_code=status.HTTP_201_CREATED)
+    def import_skill(body: SkillImportRequest) -> dict:
+        return skill_action(lambda: agent_service.skills.install(body.session_id, body.scope, body.content))
+
     @app.get("/health")
     async def health() -> dict[str, str]:
         return {"status": "ok"}
@@ -138,7 +164,7 @@ def create_app(
                 model=body.model,
                 approval_mode=body.approval_mode,
             )
-        except ConfigError as exc:
+        except (ConfigError, ToolFailure) as exc:
             raise HTTPException(status_code=422, detail=exc.public_message) from None
 
     @app.get("/sessions", response_model=list[SessionResponse])
@@ -151,6 +177,15 @@ def create_app(
             return agent_service.get_session(session_id)
         except SessionNotFoundError:
             raise HTTPException(status_code=404, detail="session not found") from None
+
+    @app.post("/sessions/{session_id}/resume", response_model=SessionResponse)
+    async def resume_session(session_id: str) -> dict:
+        try:
+            return agent_service.resume_session(session_id)
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
 
     @app.delete("/sessions/{session_id}", status_code=status.HTTP_204_NO_CONTENT)
     async def delete_session(session_id: str) -> None:
@@ -288,6 +323,8 @@ def create_app(
             )
         except SessionNotFoundError:
             raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
         except ActiveRunError:
             raise HTTPException(
                 status_code=409, detail="session already has an active run"

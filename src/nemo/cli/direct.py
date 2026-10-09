@@ -6,7 +6,8 @@ import asyncio
 import signal
 from pathlib import Path
 
-from nemo.bootstrap import build_local_tools, build_memory_store
+from nemo.bootstrap import build_local_tools, build_memory_store, build_skill_catalog, build_skill_tools
+from nemo.core.skills import skill_directory
 from nemo.core.memory import MemoryStore, memory_messages
 from nemo.core.contracts.events import EventType
 from nemo.cli.approver import TerminalApprover
@@ -53,7 +54,8 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     mode = ApprovalMode(args.mode)
     policy = ApprovalPolicy(mode, approver=TerminalApprover(output))
     memory_store = build_memory_store()
-    tools = build_local_tools(memory_store=memory_store)
+    skills = build_skill_catalog(workspace)
+    tools = (*build_local_tools(memory_store=memory_store), *build_skill_tools(skills))
     user_instructions = load_user_instructions()
     project_instructions = load_project_instructions(workspace)
     registry = ToolRegistry(tools, context=ExecutionContext(workspace=workspace), policy=policy)
@@ -66,6 +68,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
             ),
             user_instructions=user_instructions,
             project_instructions=project_instructions,
+            skills_directory=skill_directory(skills),
         ),
         context_window=(
             ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)

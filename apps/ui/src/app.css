@@ -38,7 +38,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .topbar {
   z-index: 5;
   display: grid;
-  grid-template-columns: 252px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: 252px minmax(0, 1fr) auto auto auto auto;
   align-items: center;
   color: var(--ink);
   background: var(--paper);
@@ -464,20 +464,6 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .providers-card small.configured { color: #20877e; }
 .providers-card small.missing { color: var(--danger); }
 
-.inspector-tabs { flex: 0 0 42px; display: grid; grid-template-columns: 1fr 1fr; border-bottom: 1px solid var(--line); background: #e3ece9; }
-.inspector-tabs button { position: relative; color: #708287; background: transparent; border: 0; font-size: 9px; font-weight: 650; }
-.inspector-tabs button[aria-selected="true"] { color: #234d52; background: #eef3f1; }
-.inspector-tabs button[aria-selected="true"]::after { content: ""; position: absolute; left: 18px; right: 18px; bottom: 0; height: 2px; background: var(--signal); }
-
-.trace-panel.connections-view {
-  position: fixed;
-  z-index: 30;
-  top: 64px;
-  right: 0;
-  bottom: 42px;
-  width: min(760px, calc(100vw - 252px));
-  box-shadow: -18px 0 46px rgba(16,38,44,.2);
-}
 .settings-panel { min-height: 0; flex: 1; overflow-y: auto; background: #f4f7f5; scrollbar-width: thin; }
 .settings-hero { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 22px 28px 18px; background: #f8faf8; border-bottom: 1px solid var(--line); }
 .settings-hero strong { color: #17383f; font-size: 19px; font-weight: 680; letter-spacing: -.02em; }
@@ -574,19 +560,17 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 
 @media (max-width: 1050px) {
   .workspace-grid { grid-template-columns: 224px minmax(430px, 1fr); }
-  .topbar { grid-template-columns: 224px minmax(0, 1fr) auto auto auto; }
+  .topbar { grid-template-columns: 224px minmax(0, 1fr) auto auto auto auto; }
   .trace-panel { display: none; }
-  .trace-panel.connections-view { width: min(680px, calc(100vw - 48px)); display: flex; }
 }
 
 @media (max-width: 720px) {
   .app-shell { grid-template-rows: 58px minmax(0, 1fr) 42px; }
-  .topbar { grid-template-columns: 1fr auto auto auto; }
+  .topbar { grid-template-columns: 1fr auto auto auto auto; }
   .brand-block { color: #edf6f4; }
   .brand-block p, .topbar-context { display: none; }
   .server-pill { margin-right: 10px; font-size: 0; gap: 0; padding: 9px; }
   .settings-toggle { margin-right: 2px; padding-left: 7px; padding-right: 7px; }
-  .trace-panel.connections-view { top: 58px; width: 100vw; }
   .workspace-grid { grid-template-columns: 1fr; }
   .sessions-panel { display: none; }
   .messages { padding: 24px 16px; }
@@ -621,3 +605,27 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
 .memory-dialog form input, .memory-dialog select, .memory-dialog textarea { width: 100%; padding: 9px; border: 1px solid #bacdca; border-radius: 6px; background: white; color: inherit; }
 .memory-dialog textarea { min-height: 120px; resize: vertical; }
 .memory-content { white-space: pre-wrap; }
+.memory-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 14px; }
+.memory-toolbar label { display: flex; align-items: center; gap: 7px; color: #71807c; font-size: 13px; }
+.memory-meta { color: #71807c; font-size: 12px; }
+
+.skills-dialog { width: min(800px, 92vw); }
+.skills-dialog header { margin-bottom: 14px; }
+.skills-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.skills-dialog .skill-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 14px 12px; border: 0; border-radius: 12px; background: transparent; text-align: left; }
+.skills-dialog .skill-row:hover, .skills-dialog .skill-row[aria-expanded="true"] { background: #edf1ef; }
+.skills-dialog .skill-row:focus-visible { outline: 2px solid #456d64; outline-offset: 2px; }
+.skill-icon { display: grid; place-items: center; width: 42px; height: 42px; flex: 0 0 42px; border-radius: 11px; background: #edf1ef; color: #71807c; }
+.skill-copy { display: grid; gap: 4px; min-width: 0; }
+.skill-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 500; line-height: 1.4; }
+.skill-description { min-width: 0; color: #71807c; font-size: 13px; font-weight: 400; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.skills-dialog .skill-detail-description { color: #71807c; font-size: 13px; font-weight: 400; }
+@media (max-width: 600px) { .skills-list { grid-template-columns: minmax(0, 1fr); } }
+.skill-body { max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; padding: 14px; background: #edf3f1; border: 1px solid #d6dfdd; border-radius: 6px; font: 12px/1.65 ui-monospace, monospace; }
+
+.connections-dialog { width: min(800px, 92vw); max-height: 85vh; padding: 0; border: 1px solid #d6dfdd; border-radius: 16px; color: #203936; background: #f8faf9; overflow: auto; }
+.connections-dialog::backdrop { background: #102b3166; }
+.connections-dialog-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 18px 24px; border-bottom: 1px solid #d6dfdd; }
+.connections-dialog-heading h2 { margin: 0; font-size: 20px; }
+.connections-dialog-heading button { color: #203936; padding: 7px 12px; border: 1px solid #bacdca; border-radius: 7px; background: white; cursor: pointer; }
+.connections-dialog .settings-panel { overflow: visible; }

@@ -34,6 +34,9 @@ class ServerClient:
     async def get_session(self, session_id: str) -> dict:
         return await self._json("GET", f"/sessions/{session_id}")
 
+    async def resume_session(self, session_id: str) -> dict:
+        return await self._json("POST", f"/sessions/{session_id}/resume")
+
     async def create_session(
         self, *, workspace: str, model: str | None, approval_mode: ApprovalMode
     ) -> dict:

@@ -1,12 +1,12 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 / M1–M6 已完成；Phase 2 / M7 上下文压缩、M8 工作区检索与 M9 长期记忆已实现。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
+> 当前状态：Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现。权威交付状态见 [文档索引](docs/README.md#当前状态)。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
 ## 1. 架构原则
 
-- **Core 与客户端分离**：CLI、Web 和未来 Desktop 都通过同一 Server 使用 Runtime；Core 不知道 UI 的存在。
+- **Core 与客户端分离**：CLI、Web 和 Desktop 都通过同一 Server 使用 Runtime；Core 不知道 UI 的存在。
 - **Providers are configuration, protocols are code**：Provider 是配置；协议差异封装在 adapter；Runtime 不出现厂商分支。
 - **Session 与 Run 分离**：Session 保存跨轮状态；Run 表示一次用户输入触发的独立执行。
 - **命令与事件分离**：HTTP 提交命令，SSE 传输领域事件；Prompt 不是文件协议。
@@ -27,7 +27,7 @@ flowchart TB
         API["HTTP Commands / Queries"]
         SSE["SSE Events"]
         APP["NemoApplication"]
-        USECASES["Session / Run / Catalog / Trace / Settings"]
+        USECASES["Session / Run / Catalog / Trace / Settings / Skills"]
         API --> APP --> USECASES
     end
 
@@ -75,7 +75,7 @@ flowchart TB
 | Model | `core/models/` | Registry、Resolver、统一 Model Client | 厂商判断、密钥持久化 |
 | Tool Core | `core/tools/` | 注册、参数校验、审批策略、路径与输出约束 | 具体文件或进程 I/O |
 | Adapters | `adapters/` | 协议、HTTP、持久化、Filesystem、Shell、Web | Agent Loop |
-| Application | `server/` | 应用外观及 Session、Run、Catalog、Trace、Settings 用例；HTTP/SSE | 第二套 Runtime |
+| Application | `server/` | 应用外观及 Session、Run、Catalog、Trace、Settings、Skills 用例；HTTP/SSE | 第二套 Runtime |
 | Clients | `cli/`、`apps/ui/`、`apps/ui/src-tauri/` | 用户输入、显示、交互式审批；UI 状态、视图组件与桌面窗口/sidecar 生命周期 | 直接访问数据库和密钥 |
 | Bootstrap | `bootstrap.py` | 唯一的具体依赖装配入口 | 领域逻辑 |
 
@@ -148,8 +148,9 @@ Runtime 在流式增量结束后仍取得完整 `ModelResponse`，用它完成�
 
 1. 会话内稳定的 system 前缀；
 2. 用户级与项目级 `AGENTS.md` 快照；
-3. Session 历史；
-4. 本轮临时 Reminder。
+3. 当前 Session 加载期间冻结的技能目录；
+4. Session 历史；
+5. 本轮临时 Reminder。
 
 Reminder 只添加到当前请求，不写入 Session，避免随历史累积或破坏稳定前缀。项目说明从最近 Git 根到 workspace 逐层收集并快照；非 Git 工作区只加载自身。具体规则见 [Context 设计](docs/design/context-assembly.md#3-稳定前缀)。
 
@@ -168,6 +169,7 @@ M9 通过文件存储保存用户与项目记忆，按需工具读取正文和�
 | 文件 | `search_workspace`、`read_file`、`write_file`、`edit_file`、`list_dir` | 真实路径必须位于 workspace；检索按需触发，输出受限 |
 | 记忆 | `search_memory`、`read_memory`、`save_memory`、`forget_memory` | 专用存储目录、用户/项目范围、版本检查和写入审批 |
 | 历史 | `search_sessions`、`read_session` | Server 历史只读；默认当前工作区，跨项目显式指定范围 |
+| 技能 | `list_skills`、`read_skill`、`read_skill_resource` | 专用用户/项目技能根，目录内存快照、版本检查和只读按需加载；见 [Skills](docs/reference/skills.md) |
 | 进程 | `run_shell` | 独立进程、显式 cwd、超时、输出上限、进程组清理 |
 | 网络 | `web_search`、`fetch_url` | 仅 HTTP/HTTPS、响应大小和重定向受限 |
 
@@ -206,6 +208,8 @@ flowchart LR
 - **M9 已实现**：用户与项目文件记忆、按需召回、来源会话追溯和管理界面；尚无后台提炼与 embedding。
 - **Phase 3**：加入 Orchestrator、Subagents、Skills、MCP、Sandbox、Planning、Automation 和完整 Permission Engine。
 
+Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。后续再进入 Subagents；其他能力尚未排定里程碑。
+
 Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具集合和预算；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
 
 ## 8. Roadmap
@@ -220,7 +224,8 @@ Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具
 | M6 · macOS App | 已完成 | Tauri、Python sidecar、共享历史与 Run 属主协调、访问保护和 `onedir` 打包 |
 | M7 · Context Window & Compaction | 已完成 | 模型窗口配置、旧轮次压缩、摘要恢复与额外调用事件 |
 | M8 · Workspace Retrieval | 已完成 | 按需搜索工具、本地文本排序、有来源的短预览与历史复用 |
-| M9 · Long-term Memory | 已实现 | 用户/项目 Markdown 记忆、来源追溯、管理 API/UI、追加式索引与会话读取 |
+| M9 · Long-term Memory | 已完成 | 用户/项目记忆、会话追溯与项目说明继承；见 [交付记录](docs/milestones/M9-long-term-memory.md) |
+| M10 · Skills | 已完成 | 本地技能目录、按需加载、恢复刷新、管理 UI、内置 Skill Creator/Installer（复用 Codex）、正文分页、兼容导入 API 与既有工具审批 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

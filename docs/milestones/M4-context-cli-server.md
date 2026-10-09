@@ -58,7 +58,7 @@ conda run -n nemo python -m nemo.server
 
 ## 6. 遗留与下一步
 
-- 项目说明只读取 workspace 根；向上查找记录为 TODO T1。
+- 交付时项目说明只读取 workspace 根；向上查找后续已在 [M9](M9-long-term-memory.md) 收尾完成。
 - 命令分类表需要人工维护，不能取代 Sandbox。
 - Server 的 `allow_session` 当前只在单个 Run 的策略实例内生效，跨 Run grant 尚未持久化。
 - Server 当前只有 loopback 约束，没有访问 token 和 Origin 检查；归 M6。

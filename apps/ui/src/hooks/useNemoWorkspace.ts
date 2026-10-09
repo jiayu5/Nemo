@@ -89,7 +89,8 @@ export function useNemoWorkspace() {
     );
   }
 
-  const loadSession = useCallback(async (session: Session) => {
+  const loadSession = useCallback(async (session: Session, resume = false) => {
+    if (resume) session = await api.resumeSession(session.session_id);
     streamRef.current?.close();
     streamRef.current = null;
     setActiveRun(null);
@@ -183,7 +184,7 @@ export function useNemoWorkspace() {
         setModels(modelItems);
         setProviders(providerItems);
         setProviderSettings(settings);
-        if (sessionItems[0]) await loadSession(sessionItems[0]);
+        if (sessionItems[0]) await loadSession(sessionItems[0], true);
       })
       .catch((reason: unknown) => {
         if (!cancelled) setError(message(reason, "Server unavailable"));
@@ -273,7 +274,7 @@ export function useNemoWorkspace() {
 
   async function selectSession(session: Session) {
     try {
-      await loadSession(session);
+      await loadSession(session, true);
     } catch (reason) {
       setError(message(reason, "Could not load session"));
     }

@@ -10,6 +10,7 @@ from nemo.config.loader import load_config
 from nemo.core.contracts.types import Message
 from nemo.core.models.registry import ModelRegistry
 from nemo.core.session import new_session_id
+from nemo.core.skills import SkillCatalog
 from nemo.core.tools.approval import ApprovalMode
 from nemo.prompts.instructions import load_project_instructions, load_user_instructions
 from nemo.server.errors import SessionNotFoundError
@@ -23,9 +24,12 @@ class SessionService:
         repository: Repository,
         *,
         config_loader: Callable[[], Any] = load_config,
+        skill_catalog_factory: Callable[[Path], SkillCatalog] | None = None,
     ) -> None:
         self.repository = repository
         self._config_loader = config_loader
+        self._skill_catalog_factory = skill_catalog_factory
+        self._skills: dict[str, SkillCatalog] = {}
 
     def create(
         self, *, workspace: str, model: str | None, approval_mode: ApprovalMode
@@ -34,6 +38,7 @@ class SessionService:
         if not path.is_dir():
             raise ValueError("workspace must be an existing directory")
         self._validate_model(model)
+        catalog = self._skill_catalog_factory(path) if self._skill_catalog_factory else None
         row = self.repository.create_session(
             session_id=new_session_id(),
             workspace=path,
@@ -42,6 +47,22 @@ class SessionService:
             user_instructions=load_user_instructions(),
             project_instructions=load_project_instructions(path),
         )
+        if catalog is not None:
+            self._skills[row["session_id"]] = catalog
+        return session_view(self.repository, row)
+
+    def skills(self, session_id: str) -> SkillCatalog | None:
+        row = self.require_row(session_id)
+        if self._skill_catalog_factory and session_id not in self._skills:
+            self._skills[session_id] = self._skill_catalog_factory(Path(row["workspace"]))
+        return self._skills.get(session_id)
+
+    def resume(self, session_id: str) -> dict[str, Any]:
+        row = self.require_row(session_id)
+        active = any(run["status"] in {"queued", "running"}
+                     for run in self.repository.list_runs(session_id))
+        if self._skill_catalog_factory and not active:
+            self._skills[session_id] = self._skill_catalog_factory(Path(row["workspace"]))
         return session_view(self.repository, row)
 
     def list(self) -> list[dict[str, Any]]:
@@ -52,6 +73,7 @@ class SessionService:
 
     def delete(self, session_id: str) -> None:
         self.repository.delete_session(session_id)
+        self._skills.pop(session_id, None)
 
     def update(
         self,

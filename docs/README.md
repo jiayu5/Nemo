@@ -28,10 +28,14 @@
 | M6 · macOS App | 已完成 | 2026-09-23 | [M6](milestones/M6-macos-app.md) |
 | M7 · 上下文窗口与压缩 | 已完成 | 2026-09-24 | [M7](milestones/M7-context-compaction.md) |
 | M8 · 工作区检索 | 已完成 | 2026-09-24 | [M8](milestones/M8-workspace-retrieval.md) |
-| M9 · 长期记忆与会话追溯 | 已完成 | 2026-10-08 | [M9](milestones/M9-long-term-memory.md) |
-| M9a · 项目说明继承 | 已完成 | 2026-10-09 | [M9a](milestones/M9a-project-instructions.md) |
+| M9 · 长期记忆、会话追溯与项目说明继承 | 已完成 | 2026-10-08 至 2026-10-09 | [M9](milestones/M9-long-term-memory.md) |
+| M10 · Skills | 已完成 | 2026-10-09 | [M10](milestones/M10-skills.md) |
+
+Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现。M9 记忆与 M10 技能的真实模型使用已由用户在真实会话中验收；自动化测试仍使用 Fake Model，不消耗模型 API。
 
 ## 现行参考
+
+- [Skills](reference/skills.md)：本地技能格式、加载时机、模型工具、复用 Codex 的内置 Skill Creator/Installer、正文分页、管理界面与兼容导入 API。
 
 - [Memory](reference/memory.md)：用户/项目文件记忆、工具、管理 API 与来源追溯。
 - [Server API](reference/server-api.md)：HTTP/SSE、Prompt 传递、生命周期和持久化。
@@ -41,6 +45,7 @@
 
 | 文档 | 状态 | 主题 |
 |---|---|---|
+| [skills](design/skills.md) | 已实现 | Session 使用期间冻结目录、按需加载、管理界面与内置 Skill Creator/Installer |
 | [context-assembly](design/context-assembly.md) | 已实现 | 稳定前缀、项目说明、Reminder 与上下文压缩 |
 | [long-term-memory](design/long-term-memory.md) | 已实现 | 用户/项目记忆、来源会话、追加式索引和管理界面 |
 | [workspace-retrieval](design/workspace-retrieval.md) | 已实现；embedding 待评估 | 模型按需搜索、词法排序、短预览与历史复用 |

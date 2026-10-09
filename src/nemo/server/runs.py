@@ -9,6 +9,7 @@ from typing import Any
 from uuid import uuid4
 
 from nemo.core.memory import MemoryStore, memory_messages
+from nemo.core.skills import SkillCatalog, skill_directory
 from nemo.config.loader import load_config
 from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
@@ -42,6 +43,8 @@ class RunManager:
         client_factory: Callable[..., Any],
         tools_factory: Callable[[], tuple[Any, ...]] = tuple,
         memory_store: MemoryStore | None = None,
+        skill_catalog_loader: Callable[[str], SkillCatalog | None] | None = None,
+        skill_tools_factory: Callable[[SkillCatalog], tuple[Any, ...]] | None = None,
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
     ) -> None:
@@ -49,6 +52,8 @@ class RunManager:
         self.memory_store = memory_store
         self._client_factory = client_factory
         self._tools_factory = tools_factory
+        self._skill_catalog_loader = skill_catalog_loader
+        self._skill_tools_factory = skill_tools_factory
         self._approval_timeout = approval_timeout_seconds
         self._config_loader = config_loader
         self._tasks: dict[str, asyncio.Task[None]] = {}
@@ -97,6 +102,9 @@ class RunManager:
         prompt: str,
         max_steps: int,
     ) -> dict[str, Any]:
+        catalog = (self._skill_catalog_loader(session["session_id"])
+                   if self._skill_catalog_loader else None)
+        session = {**session, "_skill_catalog": catalog}
         run_id = str(uuid4())
         row = self.repository.create_run(
             run_id=run_id,
@@ -192,7 +200,10 @@ class RunManager:
             if self.memory_store:
                 catalog = await asyncio.to_thread(self.memory_store.catalog, Path(session["workspace"]))
                 history = (*history, *memory_messages(history, catalog))
+            catalog = session.get("_skill_catalog")
             tools = self._tools_factory()
+            if catalog is not None and self._skill_tools_factory is not None:
+                tools = (*tools, *self._skill_tools_factory(catalog))
             policy = ApprovalPolicy(
                 ApprovalMode(session["approval_mode"]), approver=self._approver(run_id)
             )
@@ -213,6 +224,7 @@ class RunManager:
                     ),
                     user_instructions=session["user_instructions"],
                     project_instructions=session["project_instructions"],
+                    skills_directory=skill_directory(catalog) if catalog is not None else "",
                 ),
                 context_window=(
                     ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)

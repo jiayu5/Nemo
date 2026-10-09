@@ -12,7 +12,7 @@ React UI 通过 Nemo Server 完成 Session/Run 主链，并把审批和 Trace �
 
 - Session 导航：创建、选择和恢复会话；
 - Conversation：Markdown 消息、输入器、模型与审批选择、发送和停止；
-- Inspector：Activity 展示事件、步骤、模型和工具调用；Connections 编辑 Provider、Model、密钥与 Proxy。
+- Inspector：固定展示 Activity 的事件、步骤、模型和工具调用；顶栏 Connections 打开独立弹窗，编辑 Provider、Model、密钥与 Proxy。
 
 窄屏下布局降级为单列。输入器支持 `Enter` 发送、`Shift+Enter` 换行，并在输入法组合态禁止误发送。模型选择器只展示实际 Model；Profile 与 Alias 仍由 Server/CLI 支持，但不会作为重复模型出现在用户列表中。已有 Session 若保存的是 Profile 或 Alias，UI 会解析并显示其对应的实际 Model。Markdown 使用 `react-markdown` 与 GFM，不执行原始 HTML。
 

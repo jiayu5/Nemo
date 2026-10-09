@@ -226,6 +226,11 @@ class CliTests(unittest.TestCase):
         memory_patch = patch("nemo.cli.direct.build_memory_store", return_value=FileMemoryStore(self.workspace / "memory", settings=FakeMemorySettings()))
         memory_patch.start()
         self.addCleanup(memory_patch.stop)
+        from nemo.adapters.skills import FileSkillCatalog
+        skills_patch = patch("nemo.cli.direct.build_skill_catalog",
+                             side_effect=lambda workspace: FileSkillCatalog(workspace, self.workspace / "user-skills"))
+        skills_patch.start()
+        self.addCleanup(skills_patch.stop)
 
     def run_cli(self, argv, responses, lines=None, is_tty=False):
         written: list[str] = []
@@ -267,6 +272,26 @@ class CliTests(unittest.TestCase):
         self.assertIn("status  : completed", output)
         loaded = load_transcript(self.transcripts()[0])
         self.assertEqual([m.role for m in loaded.messages], ["user", "assistant"])
+
+    def test_direct_session_reload_rediscovers_skills_and_preserves_history(self):
+        folder = self.workspace / ".nemo" / "skills" / "review"
+        folder.mkdir(parents=True)
+        path = folder / "SKILL.md"
+        path.write_text("---\nname: review\ndescription: First description\n---\nInspect cancellation")
+        code, _, client = self.run_cli(self.base_args("Review"), [
+            ModelResponse(tool_calls=(ToolCall(id="skill", name="read_skill", arguments={"skill_id": "project:review"}),)),
+            ModelResponse(content="Reviewed")])
+        self.assertEqual(code, 0)
+        self.assertIn("First description", client.model.requests[0].messages[0].content)
+        self.assertIn("Inspect cancellation", str(client.model.requests[-1].messages))
+        path.write_text(path.read_text().replace("First description", "Second description"))
+        sid = self.transcripts()[0].stem
+        code, _, resumed = self.run_cli(self.base_args("--session", sid, "Review again"),
+                                        [ModelResponse(content="Resumed")])
+        self.assertEqual(code, 0)
+        self.assertIn("Second description", resumed.model.requests[0].messages[0].content)
+        self.assertIn("Reviewed", str(resumed.model.requests[0].messages))
+        self.assertNotIn("skills_catalog", self.transcripts()[0].read_text())
 
     def test_direct_memory_is_saved_and_visible_to_a_new_session(self):
         from nemo.adapters.memory import FileMemoryStore

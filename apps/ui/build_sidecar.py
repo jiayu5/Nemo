@@ -28,6 +28,7 @@ def main() -> None:
             "--workpath", str(build_dir / "work"),
             "--specpath", str(build_dir / "spec"),
             "--collect-submodules", "nemo",
+            "--collect-data", "nemo",
             str(root / "src" / "nemo" / "server" / "desktop.py"),
         ), cwd=root, check=True)
         shutil.copytree(build_dir / "dist" / name, destination, dirs_exist_ok=True)

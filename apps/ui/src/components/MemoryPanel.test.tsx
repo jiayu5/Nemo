@@ -21,7 +21,7 @@ describe("Memory manager", () => {
   });
   it("edits with the current revision and requires a separate forget confirmation", async () => {
     render(<MemoryPanel session={session} onClose={() => {}} />);
-    await screen.findByText("Response style");
+    fireEvent.click(await screen.findByRole("button", { name: "View Response style" }));
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
     fireEvent.change(screen.getByLabelText("Memory content"), { target: { value: "Explain in detail" } });
     fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
@@ -37,7 +37,8 @@ describe("Memory manager", () => {
   it("shows the source and surfaces stale-update errors without losing the draft", async () => {
     vi.mocked(api.messages).mockResolvedValue([{ role: "user", content: "Please remember this", tool_calls: [], tool_result: null }]);
     render(<MemoryPanel session={session} onClose={() => {}} />);
-    fireEvent.click(await screen.findByRole("button", { name: "View source" }));
+    fireEvent.click(await screen.findByRole("button", { name: "View Response style" }));
+    fireEvent.click(screen.getByRole("button", { name: "View source" }));
     await screen.findByText("Please remember this");
     await waitFor(() => expect(screen.getByRole("button", { name: "Edit" })).not.toBeDisabled());
     fireEvent.click(screen.getByRole("button", { name: "Edit" }));
@@ -45,6 +46,23 @@ describe("Memory manager", () => {
     fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("memory changed");
     expect(screen.getByLabelText("Memory content")).toHaveValue(entry.content);
+  });
+  it("keeps management controls collapsed and adds a memory on demand", async () => {
+    render(<MemoryPanel session={session} onClose={() => {}} />);
+    await screen.findByRole("button", { name: "View Response style" });
+    expect(screen.queryByRole("button", { name: "Edit" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Forget" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Refresh" })).toBeNull();
+    expect(screen.queryByLabelText("Memory content")).toBeNull();
+    expect(screen.queryByText(session.workspace)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Add memory" }));
+    fireEvent.change(screen.getByLabelText("Memory title"), { target: { value: "Test command" } });
+    fireEvent.change(screen.getByLabelText("Memory content"), { target: { value: "Run project tests" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save memory" }));
+    await waitFor(() => expect(api.saveMemory).toHaveBeenCalledWith("a", expect.objectContaining({
+      title: "Test command", content: "Run project tests", scope: "project",
+    })));
+    await waitFor(() => expect(screen.queryByLabelText("Memory content")).toBeNull());
   });
   it("turns off recall without removing entries", async () => {
     render(<MemoryPanel session={session} onClose={() => {}} />);

@@ -249,3 +249,9 @@ class MemoryForgetRequest(ApiModel):
 
 class MemorySettingsRequest(ApiModel):
     enabled: bool
+
+
+class SkillImportRequest(ApiModel):
+    session_id: str | None = None
+    scope: Literal["user", "project"] = "user"
+    content: str = Field(min_length=1, max_length=131072)

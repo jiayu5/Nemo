@@ -12,11 +12,11 @@ Context Builder 负责决定一次模型调用实际收到哪些消息，同时�
 
 | 层 | 生命周期 | 内容 |
 |---|---|---|
-| 稳定前缀 | Session | 系统提示、用户级说明、项目级说明 |
+| 稳定前缀 | Session | 系统提示、用户级说明、项目级说明、技能目录 |
 | 会话历史 | 跨 Run | 用户、assistant、tool 消息，以及 M9 应用数据索引 |
 | Reminder | 单次模型调用 | step budget 等临时状态 |
 
-组装顺序固定为：系统行为条款 → `~/.nemo/AGENTS.md` → Git 根至 workspace 的各层 `AGENTS.md` → Session 历史 → Reminder。
+组装顺序固定为：系统行为条款 → `~/.nemo/AGENTS.md` → Git 根至 workspace 的各层 `AGENTS.md` → Skills 目录 → Session 历史 → Reminder。
 
 用户说明先于项目说明，使越接近项目的约定越靠近对话；两层说明都只能追加行为偏好，不能放宽代码强制的路径和审批边界。
 
@@ -32,6 +32,8 @@ Context Builder 负责决定一次模型调用实际收到哪些消息，同时�
 - 项目说明从最近的 Git 根目录到 workspace 逐层加载，包含两端，按父级到子级排序；多层内容标注相对路径。`.git` 目录和 worktree/submodule 的 `.git` 文件都视为根边界。
 - 非 Git 工作区只加载自身 `AGENTS.md`；不加载仓库根以上的说明，跳过指向本次收集根之外的符号链接。
 - 合并后的项目说明仍共用 8000 字符上限；超大父级说明可能使后续子级内容被截断，CLI 启动信息会标注超限。
+
+Skills 目录在本次 Session 加载期间冻结，恢复或重新打开可刷新；正文通过工具按需进入历史，不写入稳定前缀。生命周期见 [Skills 参考](../reference/skills.md#加载时机)。
 
 ## 4. Reminder
 

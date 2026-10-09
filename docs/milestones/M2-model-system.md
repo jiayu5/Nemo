@@ -46,7 +46,7 @@ conda run -n nemo python examples/deepseek_agent.py "用一句话介绍你自己
 ## 6. 遗留与下一步
 
 - `openai_responses` 与 `anthropic_messages` 仍只有契约字面量，没有 adapter。
-- 模型响应仍是非流式完整响应；SSE 后来只解决领域事件传输。
+- 本里程碑交付时模型响应为非流式完整响应；后续已加入正文与推理增量，现行行为见 [模型流式回复设计](../design/model-streaming.md)。
 - Provider GUI 配置与安全写入归 M5c。
 
 2026-09-22 结构整理将通用名 `transport.py` 重命名为 `httpx_transport.py`，协议与行为未改变。

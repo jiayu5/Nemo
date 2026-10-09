@@ -2,7 +2,7 @@
 
 Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯。
 
-Phase 1 的 M1–M6 与 Phase 2 的 M7–M9 已实现，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
+Phase 1 的单 Agent 闭环与 Phase 2 的 M7–M9 已交付；M2 的其他协议适配仍未完成，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
 
 macOS Apple Silicon 可从 [GitHub Release](https://github.com/jiayu5/Nemo/releases/latest) 下载打包应用；当前版本为 `v0.2.0`。
 
@@ -34,7 +34,7 @@ npm --prefix apps/ui run dev
 
 打开 `http://127.0.0.1:5173`。Vite 将 `/api` 代理到本地 Server；UI 不直接读取数据库、配置文件或密钥。若要换 Server 端口，在启动 Server、CLI 和 Vite 前设置同一个 `NEMO_SERVER_PORT` 环境变量。
 
-右上角 **Connections** 可以新增或更新 Provider/Model、设置默认模型、配置 API Key 与可选 Proxy，并在保存后显式测试连接。密钥旧值不会回显；来自 Server 进程环境的值是只读覆盖层。
+右上角 **Connections** 打开独立配置弹窗，可以新增或更新 Provider/Model、设置默认模型、配置 API Key 与可选 Proxy，并在保存后显式测试连接。密钥旧值不会回显；来自 Server 进程环境的值是只读覆盖层。
 
 ### CLI
 
@@ -63,11 +63,13 @@ open apps/ui/src-tauri/target/release/bundle/macos/Nemo.app
 
 桌面端点击“Open a workspace”或“Browse…”会打开 macOS 目录选择器；浏览器端仍可直接输入目录。Session 可从左侧列表删除，删除前需要二次确认；活动 Run 所在的 Session 不可删除。
 
+顶栏 **Skills** 可查看用户与当前项目已安装的技能，并查看正文。内置 `skill-installer` 可通过对话从 GitHub 安装完整技能目录；`skill-creator` 支持通过对话创建完整项目技能，可直接说“把这个流程保存为技能”。名称和描述提前提供给模型，正文按需加载；技能目录变更后重新打开会话生效。格式及恢复行为见 [Skills 参考](docs/reference/skills.md)。
+
 ## 当前能力
 
 - 配置驱动的 Provider、Model、Alias 和 Profile；选择优先级为 `run > session > agent > default`。
 - `openai_compatible` 协议和 Tool Calling；其他协议名称已预留，但适配器尚未实现。
-- 七个工具：`read_file`、`write_file`、`edit_file`、`list_dir`、`run_shell`、`web_search`、`fetch_url`。
+- 本地文件、Shell、Web、工作区检索、长期记忆与历史会话与 Skills 工具；可用范围见 [架构文档](NEMO_ARCHITECTURE.md#tool)。
 - `ask`、`auto`、`full` 三档审批；`auto` 依赖启发式规则，不是沙箱。
 - Session/Run、消息、事件、步骤、工具调用和模型身份持久化。
 - SSE 领域事件、取消、审批回传、断线续读和 Run Trace。

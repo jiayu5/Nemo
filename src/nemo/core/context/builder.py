@@ -38,11 +38,13 @@ class ContextBuilder:
         user_instructions: str | None = None,
         project_instructions: str | None = None,
         max_instructions_chars: int = DEFAULT_MAX_INSTRUCTIONS_CHARS,
+        skills_directory: str = "",
     ):
         self.system_prompt = (system_prompt or "").strip()
         self.user_instructions = (user_instructions or "").strip()
         self.project_instructions = (project_instructions or "").strip()
         self.max_instructions_chars = max_instructions_chars
+        self.skills_directory = skills_directory
         self.prefix = self._assemble_prefix()
 
     def build(
@@ -75,6 +77,8 @@ class ContextBuilder:
             bounded = self._bounded_instructions(text)
             if bounded:
                 parts.append(f"{header}\n{bounded}")
+        if self.skills_directory:
+            parts.append(f"# Available skills\n{self.skills_directory}")
         return "\n\n".join(parts)
 
     def _bounded_instructions(self, text: str) -> str:

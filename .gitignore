@@ -1,7 +1,9 @@
 .venv/
+.DS_Store
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.nemo/skill-installer-tools/
 dist/
 *.egg-info/
 .env

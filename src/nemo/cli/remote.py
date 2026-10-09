@@ -38,7 +38,7 @@ async def serve_remote(args, output: Streams) -> int:
                 output.write(session["session_id"])
             return 0
         if args.session:
-            session = await client.get_session(args.session)
+            session = await client.resume_session(args.session)
             resumed = True
             if session["workspace"] != str(workspace):
                 output.write(

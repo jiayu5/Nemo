@@ -60,7 +60,7 @@ Server 返回 Provider、Model、变量名和密钥来源，但绝不返回密�
 
 Settings 沿用 Nemo 三栏工作台，不新增独立后台风格：
 
-- 右侧 Inspector 在 Run 与 Connections 两个视图间切换；Connections 在桌面端展开为宽抽屉，窄屏使用全宽布局；
+- 右侧 Inspector 固定展示 Run activity；顶栏 Connections 打开独立模态弹窗，支持 Close 与 Escape，宽度不影响右侧布局，窄屏随视口收缩；
 - Connections 顶部以横向连接卡切换已有 Provider，并提供独立的 `Add provider` / `Custom` 入口；
 - 编辑区明确区分 Provider 与 Model 各自的 `create` / `edit` 状态，按 Connection、Credentials、Model 和高级网络选项分组；新增 Provider 使用 `Confirm add`，不会被初始 Provider 自动选择覆盖；
 - Model 区完整列出当前 Provider 的全部模型；`Add model` 进入独立空白编辑态，保存时追加模型而不覆盖同 Provider 的现有模型；

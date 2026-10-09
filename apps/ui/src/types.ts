@@ -194,3 +194,19 @@ export interface MemoryEntry {
 export interface MemoryState { enabled: boolean; entries: MemoryEntry[] }
 export type MemoryDraft = Pick<MemoryEntry, "scope" | "title" | "content" | "kind"> &
   Partial<Pick<MemoryEntry, "id" | "revision">>;
+
+export interface InstalledSkill {
+  id: string;
+  name: string;
+  description: string;
+  scope: "builtin" | "user" | "project";
+}
+
+export interface SkillDetail extends InstalledSkill {
+  body: string;
+}
+
+export interface InstalledSkills {
+  entries: InstalledSkill[];
+  diagnostics: string[];
+}
