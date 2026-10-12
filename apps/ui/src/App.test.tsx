@@ -611,6 +611,28 @@ describe("App", () => {
     );
   });
 
+  it("opens a recorded child execution and returns to the same parent conversation", async () => {
+    responses["/api/sessions"] = [{ session_id: "session-1", workspace: "/workspace", model: "demo-model",
+      approval_mode: "ask", created_at: "", updated_at: "", message_count: 0 }];
+    responses["/api/sessions/session-1/messages"] = [];
+    responses["/api/sessions/session-1/runs"] = [{ run_id: "run-1", session_id: "session-1", status: "completed" }];
+    responses["/api/runs/run-1/trace"] = { run: { run_id: "run-1", session_id: "session-1", status: "completed" },
+      duration_ms: 1, steps: [], model_calls: [], tool_calls: [], events: [
+        { run_id: "run-1", seq: 1, step: 1, type: "subagent.event", payload: { child_run_id: "child-one", child_step: 0,
+          child_type: "subagent.queued", child_payload: { task: "Check lifecycle" } } },
+        { run_id: "run-1", seq: 2, step: 2, type: "subagent.event", payload: { child_run_id: "child-one", child_step: 1,
+          child_type: "subagent.finished", child_payload: { status: "completed", output: "Recorded child findings" } } },
+      ] };
+    render(<App />);
+    fireEvent.click(await screen.findByRole("button", { name: "View subagent child-one" }));
+    const parent = screen.getByLabelText("Conversation messages");
+    const child = await screen.findByRole("dialog", { name: "Subagent child-one" });
+    expect(child).toHaveTextContent("Recorded child findings");
+    fireEvent.click(screen.getByRole("button", { name: "Back to conversation" }));
+    expect(screen.queryByRole("dialog", { name: "Subagent child-one" })).toBeNull();
+    expect(screen.getByLabelText("Conversation messages")).toBe(parent);
+  });
+
   it("folds reasoning and tool activity into one collapsed block per turn", async () => {
     responses["/api/sessions"] = [{
       session_id: "session-1", workspace: "/workspace", model: "demo-model",

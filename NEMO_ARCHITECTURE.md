@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现。权威交付状态见 [文档索引](docs/README.md#当前状态)。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
+> 当前状态：Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 异步并行只读分派已实现。权威交付状态见 [文档索引](docs/README.md#当前状态)。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -12,7 +12,7 @@ Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、C
 - **命令与事件分离**：HTTP 提交命令，SSE 传输领域事件；Prompt 不是文件协议。
 - **Memory 与 Context 分离**：Memory 保存可复用信息；Context 决定一次模型调用实际看到什么。
 - **边界先于能力**：路径、输出、超时、取消、审批和脱敏必须可测试；不得把审批或 workspace 描述为沙箱。
-- **单一 Runtime**：CLI、Server、UI、未来 Subagent 均复用同一 Agent Loop，不复制执行内核。
+- **单一 Runtime**：CLI、Server、UI、Subagent 均复用同一 Agent Loop，不复制执行内核。
 
 ## 2. 当前系统
 
@@ -208,9 +208,9 @@ flowchart LR
 - **M9 已实现**：用户与项目文件记忆、按需召回、来源会话追溯和管理界面；尚无后台提炼与 embedding。
 - **Phase 3**：加入 Orchestrator、Subagents、Skills、MCP、Sandbox、Planning、Automation 和完整 Permission Engine。
 
-Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。后续再进入 Subagents；其他能力尚未排定里程碑。
+Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。M11 Subagents 已实现异步并行只读分派，机制见 [Subagents 设计](docs/design/subagents.md)；其他能力尚未排定里程碑。
 
-Subagent 将复用同一个 Runtime，但拥有独立状态、上下文、工具集合和预算；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
+Subagent 复用同一个 Runtime，拥有独立状态、上下文、只读工具集合和步数/时间限制；父 Run 管理并行生命周期、查询/等待/取消及共享调用预算；子任务预留预算内的最后一步返回部分报告，UI 可基于父事件流查看独立执行详情；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
 
 ## 8. Roadmap
 

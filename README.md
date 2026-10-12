@@ -1,6 +1,6 @@
 # Nemo
 
-Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯。
+Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯、Skills 与异步并行只读 Subagents。
 
 Phase 1 的单 Agent 闭环与 Phase 2 的 M7–M9 已交付；M2 的其他协议适配仍未完成，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
 
@@ -46,6 +46,8 @@ conda run -n nemo python -m nemo.cli --session <session-id>
 ```
 
 交互模式使用 `:exit` 或 `:quit` 退出；Session 仍保存在 Server 的 SQLite 中。`--direct` 是绕过 Server 的旧直连恢复模式，不是默认路径。
+
+可以要求“把这项调查交给子 Agent，再汇总证据”。主 Agent 可调用 `delegate_task`；当前子 Agent 只读、使用独立上下文，详细限制见 [Subagents 参考](docs/reference/subagents.md)。
 
 ### macOS App
 

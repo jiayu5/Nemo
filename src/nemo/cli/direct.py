@@ -19,11 +19,12 @@ from nemo.core.context.builder import DEFAULT_MAX_INSTRUCTIONS_CHARS, ContextBui
 from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.runtime.agent import AgentRuntime
+from nemo.core.runtime.subagents import SubagentManager
 from nemo.core.session import Session
 from nemo.core.tools.approval import ApprovalMode, ApprovalPolicy
 from nemo.core.tools.registry import ToolRegistry
 from nemo.prompts.instructions import load_project_instructions, load_user_instructions
-from nemo.prompts.system_prompt import build_system_prompt
+from nemo.prompts.system_prompt import build_subagent_system_prompt, build_system_prompt
 from nemo.redaction import redact
 
 MODE_LABELS = {
@@ -58,9 +59,26 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     tools = (*build_local_tools(memory_store=memory_store), *build_skill_tools(skills))
     user_instructions = load_user_instructions()
     project_instructions = load_project_instructions(workspace)
+    window = (
+        ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
+        if resolved.context_window_tokens is not None else None
+    )
+    child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
+    subagents = SubagentManager(
+        client, child_tools, policy=policy, context_window=window,
+        context=ContextBuilder(
+            system_prompt=build_subagent_system_prompt(
+                workspace=workspace, tools=(tool.name for tool in child_tools),
+            ),
+            user_instructions=user_instructions,
+            project_instructions=project_instructions,
+            skills_directory=skill_directory(skills),
+        ),
+    )
+    tools = (*tools, *subagents.tools())
     registry = ToolRegistry(tools, context=ExecutionContext(workspace=workspace), policy=policy)
     runtime = AgentRuntime(
-        client,
+        subagents.model,
         registry,
         ContextBuilder(
             system_prompt=build_system_prompt(
@@ -70,10 +88,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
             project_instructions=project_instructions,
             skills_directory=skill_directory(skills),
         ),
-        context_window=(
-            ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
-            if resolved.context_window_tokens is not None else None
-        ),
+        context_window=window,
         checkpoint=checkpoint,
     )
 

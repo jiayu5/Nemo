@@ -46,6 +46,14 @@ class PromptClause:
     body: str
 
 
+SUBAGENT_ROLE = PromptClause(
+    "subagent_role",
+    "You are a read-only subagent. Return findings and evidence to the parent. "
+    "Prioritize targeted reads and finish before the step limit. Report confirmed findings, "
+    "evidence and unchecked items. Report unavailable actions; do not claim to have performed them.",
+)
+
+
 CLAUSES: tuple[PromptClause, ...] = (
     PromptClause(
         "act_when_ready",
@@ -137,6 +145,13 @@ CLAUSES: tuple[PromptClause, ...] = (
         "project files take precedence. Cross-project history requires the user's request.",
     ),
     PromptClause(
+        "subagent_delegation",
+        "Use spawn_subagents for parallel read-only tasks with explicit background. Continue "
+        "your work, then get_subagents or wait_subagents. Check evidence and statuses; "
+        "limit_reached reports are partial. Collect results before your final answer; "
+        "remaining children are cancelled at run end. Use cancel_subagent for unwanted work.",
+    ),
+    PromptClause(
         "memory_capture",
         "Use save_memory for durable user preferences, corrections and project background "
         "worth retaining across sessions. Report what you saved. Do not duplicate AGENTS.md "
@@ -171,6 +186,8 @@ def build_system_prompt(
     )
     clauses = tuple(c for c in CLAUSES
                     if (not c.name.startswith("memory_") or "search_memory" in tools)
+                    and (c.name != "memory_capture" or "save_memory" in tools)
+                    and (c.name != "subagent_delegation" or "delegate_task" in tools)
                     and (c.name != "skill_workflows" or "read_skill" in tools))
     body = "\n\n".join(clause.body for clause in (*clauses, language_clause))
     return f"{IDENTITY}\n\n{environment}\n\n# How you work\n{body}"
@@ -180,3 +197,7 @@ def clause_names(clauses: Sequence[PromptClause] = CLAUSES) -> tuple[str, ...]:
     """Exposed for tests and for future per-profile clause selection."""
 
     return tuple(clause.name for clause in clauses)
+
+
+def build_subagent_system_prompt(*, workspace: Path | str, tools: Iterable[str]) -> str:
+    return build_system_prompt(workspace=workspace, tools=tools) + "\n\n" + SUBAGENT_ROLE.body

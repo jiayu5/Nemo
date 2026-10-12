@@ -25,6 +25,7 @@ class EventType(StrEnum):
     APPROVAL_REQUESTED = "approval.requested"
     APPROVAL_RESOLVED = "approval.resolved"
     OBSERVER_FAILED = "observer.failed"
+    SUBAGENT_EVENT = "subagent.event"
 
 
 TERMINAL_RUN_EVENT_TYPES = frozenset(

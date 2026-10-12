@@ -1,4 +1,5 @@
 from typing import Any, Mapping
+import asyncio
 
 from pydantic import BaseModel, ConfigDict
 
@@ -52,6 +53,42 @@ class AdditionModel:
         if result.error or result.output != 42:
             raise ValueError("Expected successful tool result 42")
         return ModelResponse(content="12 + 30 = 42")
+
+
+class BlockingModel:
+    """Wait until cancelled, exposing synchronization points for lifecycle tests."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.stopped = asyncio.Event()
+        self.release = asyncio.Event()
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        self.started.set()
+        try:
+            await self.release.wait()
+            return ModelResponse(content="Released")
+        finally:
+            self.stopped.set()
+
+
+class CleanupBlockingModel:
+    """Expose an asynchronous resource cleanup phase after model cancellation."""
+
+    def __init__(self):
+        self.started = asyncio.Event()
+        self.cleanup_started = asyncio.Event()
+        self.cleanup_release = asyncio.Event()
+        self.stopped = asyncio.Event()
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        self.started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            self.cleanup_started.set()
+            await self.cleanup_release.wait()
+            self.stopped.set()
 
 
 class RecordingTransport:
@@ -155,3 +192,14 @@ class FakeMemorySettings:
 
     def set_memory_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
+
+
+class CallbackModel:
+    """Offline request-aware async responder for concurrency and integration tests."""
+    def __init__(self, responder):
+        self.responder = responder
+        self.requests: list[ModelRequest] = []
+
+    async def generate(self, request: ModelRequest) -> ModelResponse:
+        self.requests.append(request.model_copy(deep=True))
+        return await self.responder(request)

@@ -1,4 +1,3 @@
-import { useEffect, useRef } from "react";
 import type { FormEventHandler } from "react";
 import Markdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -11,6 +10,7 @@ import type {
   Session,
 } from "../types";
 import { Composer } from "./Composer";
+import { useFollowScroll } from "../hooks/useFollowScroll";
 
 interface Props {
   selected: Session | null;
@@ -156,12 +156,9 @@ export function Conversation({
   selected, messages, liveText, liveReasoning, models, activeRun, approval, prompt, onPromptChange, onSubmit,
   onStop, onApproval, onModeChange, onModelChange,
 }: Props) {
-  const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const scroll = useFollowScroll(selected?.session_id ?? null, [messages, liveText, liveReasoning]);
   const items = buildItems(messages);
 
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView?.({ block: "end" });
-  }, [messages, liveText, liveReasoning]);
 
   return (
     <section className="conversation-panel panel">
@@ -172,7 +169,8 @@ export function Conversation({
         </div>
       </div>
 
-      <div className="messages" aria-label="Conversation messages">
+      <div className="messages" aria-label="Conversation messages" ref={scroll.ref}
+        onWheel={scroll.onWheel} onScroll={scroll.onScroll}>
         {items.filter((item) => item.kind === "message" || item.steps.length > 0 || item.answer).map((item) => (
           item.kind === "message" ? (
             <article className={`message ${item.message.role}`} key={item.key}>
@@ -222,8 +220,9 @@ export function Conversation({
             </div>
           </div>
         )}
-        <div ref={messagesEndRef} />
       </div>
+
+      {scroll.paused && <button className="jump-to-latest" type="button" onClick={scroll.resume}>Jump to latest</button>}
 
       {approval && (
         <section className="approval-card">

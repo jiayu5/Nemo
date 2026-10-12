@@ -24,7 +24,10 @@ __all__ = ["MASK", "redact", "render_event"]
 
 def render_event(event: Event) -> str:
     payload = event.payload
-    if event.type == EventType.MODEL_COMPLETED:
+    if event.type == EventType.SUBAGENT_EVENT:
+        line = (f"{event.seq:>3} subagent {str(payload.get('child_run_id', '?'))[:7]} "
+                f"{payload.get('child_type', '?')} step={payload.get('child_step', 0)}")
+    elif event.type == EventType.MODEL_COMPLETED:
         line = (
             f"{event.seq:>3} model.completed tools={payload.get('tool_call_count', 0)} "
             f"prompt={_count(payload.get('prompt_tokens'))} "

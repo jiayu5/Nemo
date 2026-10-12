@@ -30,10 +30,13 @@
 | M8 · 工作区检索 | 已完成 | 2026-09-24 | [M8](milestones/M8-workspace-retrieval.md) |
 | M9 · 长期记忆、会话追溯与项目说明继承 | 已完成 | 2026-10-08 至 2026-10-09 | [M9](milestones/M9-long-term-memory.md) |
 | M10 · Skills | 已完成 | 2026-10-09 | [M10](milestones/M10-skills.md) |
+| M11 · Subagents | 进行中：异步并行只读分派已实现，真实模型待验收 | — | [M11](milestones/M11-subagents.md) |
 
-Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现。M9 记忆与 M10 技能的真实模型使用已由用户在真实会话中验收；自动化测试仍使用 Fake Model，不消耗模型 API。
+Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 已实现异步并行只读分派。M9 记忆与 M10 技能的真实模型使用已由用户在真实会话中验收；自动化测试仍使用 Fake Model，不消耗模型 API。
 
 ## 现行参考
+
+- [Subagents](reference/subagents.md)：异步并行分派、独立上下文、预算与部分报告、能力限制、嵌套事件与可查看详情。
 
 - [Skills](reference/skills.md)：本地技能格式、加载时机、模型工具、复用 Codex 的内置 Skill Creator/Installer、正文分页、管理界面与兼容导入 API。
 
@@ -45,6 +48,7 @@ Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未�
 
 | 文档 | 状态 | 主题 |
 |---|---|---|
+| [subagents](design/subagents.md) | 首版已实现 | 异步并行只读分派、Run 生命周期与共享预算 |
 | [skills](design/skills.md) | 已实现 | Session 使用期间冻结目录、按需加载、管理界面与内置 Skill Creator/Installer |
 | [context-assembly](design/context-assembly.md) | 已实现 | 稳定前缀、项目说明、Reminder 与上下文压缩 |
 | [long-term-memory](design/long-term-memory.md) | 已实现 | 用户/项目记忆、来源会话、追加式索引和管理界面 |

@@ -6,11 +6,29 @@ interface Props {
   trace: Trace | null;
   events: RunEvent[];
   onSelectRun: (run: Run) => void;
+  onSelectSubagent?: (id: string) => void;
 }
 
 export function InspectorPanel({
-  runs, trace, events, onSelectRun,
+  runs, trace, events, onSelectRun, onSelectSubagent,
 }: Props) {
+  const children = new Map<string, { status: string; step: number }>();
+  for (const event of events) {
+    if (event.type !== "subagent.event" || typeof event.payload.child_run_id !== "string") continue;
+    const id = event.payload.child_run_id;
+    const child = children.get(id) ?? { status: "queued", step: 0 };
+    child.step = Number(event.payload.child_step ?? child.step);
+    const type = String(event.payload.child_type ?? "");
+    if (type === "run.started") child.status = "running";
+    else if (type.startsWith("run.") && type !== "run.started") child.status = type.slice(4);
+    else if (type === "subagent.finished") {
+      const payload = event.payload.child_payload as Record<string, unknown> | undefined;
+      child.status = String(payload?.status ?? child.status);
+    }
+    children.set(id, child);
+  }
+  const visibleEvents = events.filter(event => event.type !== "subagent.event" ||
+    !["model.delta", "model.reasoning_delta"].includes(String(event.payload.child_type)));
   return (
     <aside className="trace-panel panel activity-view" aria-label="Run activity">
     <div className="panel-heading inspector-heading">
@@ -34,11 +52,21 @@ export function InspectorPanel({
         <div className="metric-row"><span>Tools</span><strong>{trace.tool_calls.length}</strong></div>
       </section>
     )}
+    {!!children.size && <section className="subagent-summary" aria-label="Subagents">
+      <strong>Subagents</strong>
+      {[...children].map(([id, child]) => <button type="button" className="subagent-status" key={id} aria-label={`View subagent ${id}`}
+        onClick={() => onSelectSubagent?.(id)}>
+        <span>Subagent {id.slice(0, 7)}</span><span className={`status-dot ${child.status}`} />
+        <small>{child.status} · step {child.step}</small>
+      </button>)}
+    </section>}
     <div className="event-list">
-      {events.map((event) => (
+      {visibleEvents.map((event) => (
         <div className="event-row" key={event.seq}>
           <b>{event.seq}</b>
-          {event.type === "context.compacted" ? (
+          {event.type === "subagent.event" ? (
+            <span>Subagent {String(event.payload.child_run_id ?? "").slice(0, 7)} · {String(event.payload.child_type ?? "")} · step {String(event.payload.child_step ?? 0)}</span>
+          ) : event.type === "context.compacted" ? (
             <details>
               <summary>Context compressed through message {String(event.payload.covered_messages)}</summary>
               <p>{String(event.payload.summary ?? "")}</p>
@@ -49,7 +77,7 @@ export function InspectorPanel({
           <small>step {event.step}</small>
         </div>
       ))}
-      {!events.length && <p className="empty-note">Run events will appear here.</p>}
+      {!visibleEvents.length && <p className="empty-note">Run events will appear here.</p>}
     </div>
     </aside>
   );

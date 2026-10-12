@@ -1,5 +1,6 @@
 """Small sequential loop; each run owns its state and cancellation handle."""
 import asyncio
+import json
 from collections.abc import Sequence
 from collections.abc import Callable
 
@@ -7,13 +8,15 @@ from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.compaction import (
     CompactionCheckpoint, ContextEngine, ContextWindow, estimate_request_tokens,
 )
-from nemo.core.context.reminder import describe, fit_reminders, slot_open, step_budget
+from nemo.core.context.reminder import describe, final_report, fit_reminders, slot_open, step_budget
 from nemo.core.contracts.events import EventType
 from nemo.core.contracts.types import (
     AgentState, Event, Message, Model, ModelReasoningDelta, ModelResponse, ModelTextDelta,
     ModelUsage, RunResult, RunStatus, ToolError, ToolResult,
 )
 from nemo.core.tools.registry import ToolRegistry
+from nemo.core.tools.limits import truncate_text
+from nemo.redaction import redact
 
 
 class AgentRuntime:
@@ -31,7 +34,9 @@ class AgentRuntime:
                   cancel: asyncio.Event | None = None,
                   on_event: Callable[[Event], None] | None = None,
                   history: Sequence[Message] = (),
-                  run_id: str | None = None) -> RunResult:
+                  run_id: str | None = None,
+                  finish_with_summary: bool = False,
+                  include_execution_details: bool = False) -> RunResult:
         if isinstance(max_steps, bool) or not isinstance(max_steps, int) or max_steps < 1:
             raise ValueError("max_steps must be a positive integer")
         # ``history`` is copied, never adopted: a run does not mutate the
@@ -72,7 +77,11 @@ class AgentRuntime:
                 emit(EventType.STEP_STARTED)
                 # Reminders only exist while the model keeps acting. The user's
                 # own turn has the full step budget, so nothing is injected there.
-                reminders = fit_reminders((step_budget(step, max_steps),)) if slot_open(state) else ()
+                closing = finish_with_summary and step == max_steps
+                reminders = fit_reminders((step_budget(step, max_steps),
+                    *((final_report(),) if closing else ()))) if slot_open(state) else ()
+                request_tools = (ToolRegistry((), context=self.tools.context, policy=self.tools.policy)
+                                 if closing else self.tools)
                 if self.context_engine:
                     def compression_event(stage: str, usage: ModelUsage | None) -> None:
                         if stage == "started":
@@ -81,7 +90,7 @@ class AgentRuntime:
                             emit(EventType.CONTEXT_COMPRESSION_COMPLETED, **_usage_payload(usage))
 
                     request, compacted = await self.context_engine.build(
-                        state, self.tools, reminders, on_compression=compression_event
+                        state, request_tools, reminders, on_compression=compression_event
                     )
                     for checkpoint in compacted:
                         emit(EventType.CONTEXT_COMPACTED,
@@ -89,7 +98,7 @@ class AgentRuntime:
                              history_digest=checkpoint.history_digest,
                              summary=checkpoint.summary)
                 else:
-                    request = self.context.build(state, self.tools, reminders)
+                    request = self.context.build(state, request_tools, reminders)
                 emit(EventType.MODEL_STARTED, reminders=describe(reminders))
                 partial_text.clear()
                 partial_reasoning.clear()
@@ -111,13 +120,37 @@ class AgentRuntime:
                             raise TypeError("Model stream returned an unknown item")
                     if response is None:
                         raise ValueError("Model stream ended without a final response")
+                details = {}
+                if include_execution_details:
+                    details = {
+                        "content": truncate_text(redact(response.content), 8000),
+                        "reasoning_content": truncate_text(redact(response.reasoning_content), 8000),
+                        "tool_calls": [{"id": call.id, "name": call.name,
+                            "arguments": truncate_text(redact(json.dumps(call.arguments, ensure_ascii=False)), 2000)}
+                            for call in response.tool_calls[:20]],
+                        "tool_calls_omitted": max(0, len(response.tool_calls) - 20),
+                    }
                 emit(EventType.MODEL_COMPLETED, tool_call_count=len(response.tool_calls),
-                     **_usage_payload(response.usage))
+                     **_usage_payload(response.usage), **details)
                 partial_text.clear()
                 partial_reasoning.clear()
                 state.messages.append(Message(role="assistant", content=response.content,
                                               reasoning_content=response.reasoning_content,
                                               tool_calls=response.tool_calls))
+                if closing:
+                    # No extra call beyond max_steps. Preserve partial findings honestly.
+                    state.output = response.content or (
+                        "Step limit reached before a findings report was produced. "
+                        "No completed conclusion is available; this investigation remains incomplete."
+                    )
+                    state.status = RunStatus.LIMIT_REACHED
+                    for call in response.tool_calls:
+                        # A model may ignore the empty schema; never execute those calls.
+                        state.messages.append(Message(role="tool", tool_result=ToolResult(
+                            tool_call_id=call.id, error=ToolError(code="denied",
+                                message="Final report turn: tools are unavailable"))))
+                    emit(EventType.STEP_COMPLETED)
+                    return
                 if not response.tool_calls:
                     state.output = response.content
                     state.status = RunStatus.COMPLETED
@@ -129,7 +162,13 @@ class AgentRuntime:
                         raise asyncio.CancelledError
                     summary = self.tools.summary_for(call)
                     emit(EventType.TOOL_STARTED, tool_call_id=call.id, name=call.name, summary=summary)
-                    result = await self.tools.execute(call)
+                    def child_event(event: Event, tool_call_id: str = call.id) -> None:
+                        emit(EventType.SUBAGENT_EVENT, tool_call_id=tool_call_id,
+                             child_run_id=event.run_id, child_seq=event.seq,
+                             child_step=event.step, child_type=event.type,
+                             child_payload=event.payload)
+
+                    result = await self.tools.execute(call, on_event=child_event)
                     if (self.context_engine and result.error is None
                             and self.tools.is_read_only(call.name)):
                         current_user = max(
@@ -157,13 +196,18 @@ class AgentRuntime:
                     emit(EventType.TOOL_FAILED if result.error else EventType.TOOL_COMPLETED,
                          tool_call_id=call.id, name=call.name,
                          summary=summary,
-                         error_code=result.error.code if result.error else None)
+                         error_code=result.error.code if result.error else None,
+                         **({"result": truncate_text(redact(result.model_dump_json()), 6000)}
+                            if include_execution_details else {}))
                 emit(EventType.STEP_COMPLETED)
             state.status = RunStatus.LIMIT_REACHED
 
         worker = None
         watcher = None
+        scope_started = False
         try:
+            self.tools.begin_run()
+            scope_started = True
             if cancel is not None and cancel.is_set():
                 state.status = RunStatus.CANCELLED
             else:
@@ -195,12 +239,27 @@ class AgentRuntime:
             # text never reaches the result or the event stream.
             state.error = getattr(exc, "public_message", None) or "Runtime execution failed"
         finally:
-            for task in (worker, watcher):
-                if task is not None and not task.done():
-                    task.cancel()
-            await asyncio.gather(*(t for t in (worker, watcher) if t is not None),
-                                 return_exceptions=True)
+            async def cleanup():
+                for task in (worker, watcher):
+                    if task is not None and not task.done() and not task.cancelling():
+                        task.cancel()
+                await asyncio.gather(*(t for t in (worker, watcher) if t is not None),
+                                     return_exceptions=True)
+                if scope_started:
+                    await self.tools.end_run()
+
+            cleanup_task = asyncio.create_task(cleanup())
+            cleanup_cancelled = False
+            while not cleanup_task.done():
+                try:
+                    await asyncio.shield(cleanup_task)
+                except asyncio.CancelledError:
+                    cleanup_cancelled = True
+                    state.status = RunStatus.CANCELLED
+            cleanup_task.result()
             emit(EventType(f"run.{state.status.value}"), **({"error": state.error} if state.error else {}))
+            if cleanup_cancelled:
+                raise asyncio.CancelledError
         return RunResult(state=state, events=tuple(events))
 
 

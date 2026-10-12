@@ -1,12 +1,13 @@
 """Tool validation, policy enforcement and errors are separate from generation."""
 from pathlib import Path
+from collections.abc import Callable
 from typing import Protocol
 
 from pydantic import BaseModel, ValidationError
 
 from nemo.core.contracts.errors import ToolFailure
 from nemo.core.contracts.tools import ExecutionContext, ToolCallFacts, ToolPolicy
-from nemo.core.contracts.types import ToolCall, ToolError, ToolResult, ToolSpec
+from nemo.core.contracts.types import Event, ToolCall, ToolError, ToolResult, ToolSpec
 from nemo.core.tools.policy import AllowAllPolicy
 
 MAX_SUMMARY_CHARS = 200
@@ -34,6 +35,9 @@ class Tool(Protocol):
     # runs shell commands declares the exact text here so the approval layer can
     # classify it without importing adapter code (see RunShellTool). Optional
     # rather than required so a tool that runs no commands needs no stub.
+    # Optional ``execute_with_events(arguments, context, *, on_event)`` allows a
+    # delegating tool to forward child events without adopting the parent's trace.
+    # Optional runtime_scope shares begin_run/end_run across tools owning background work.
 
 
 class ToolRegistry:
@@ -53,6 +57,22 @@ class ToolRegistry:
         self.context = context or ExecutionContext(workspace=Path.cwd())
         self.policy = policy or AllowAllPolicy()
         self.max_result_chars = max_result_chars
+
+    def _runtime_scopes(self) -> tuple:
+        scopes = {}
+        for tool in self._tools.values():
+            scope = getattr(tool, "runtime_scope", None)
+            if scope is not None:
+                scopes[id(scope)] = scope
+        return tuple(scopes.values())
+
+    def begin_run(self) -> None:
+        for scope in self._runtime_scopes():
+            scope.begin_run()
+
+    async def end_run(self) -> None:
+        for scope in self._runtime_scopes():
+            await scope.end_run()
 
     def schemas(self) -> tuple[ToolSpec, ...]:
         return tuple(ToolSpec(name=t.name, description=t.description,
@@ -81,7 +101,8 @@ class ToolRegistry:
             return None
         return self._describe(tool, arguments) or None
 
-    async def execute(self, call: ToolCall) -> ToolResult:
+    async def execute(self, call: ToolCall, *,
+                      on_event: Callable[[Event], None] | None = None) -> ToolResult:
         tool = self._tools.get(call.name)
         if tool is None:
             return self._error(call, "unknown_tool", "Tool is not registered")
@@ -96,7 +117,11 @@ class ToolRegistry:
         if not decision.allowed:
             return self._error(call, "denied", decision.reason or "Denied by policy")
         try:
-            output = await tool.execute(arguments, self.context)
+            event_executor = getattr(tool, "execute_with_events", None)
+            if event_executor is not None:
+                output = await event_executor(arguments, self.context, on_event=on_event)
+            else:
+                output = await tool.execute(arguments, self.context)
         except ToolFailure as exc:
             # Expected failure: the message is authored by our own tool code and
             # is exactly what the model needs to correct itself.

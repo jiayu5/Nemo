@@ -51,6 +51,96 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.services.append(service)
         return service, model
 
+    async def test_subagent_round_trip_persists_nested_trace_without_child_session(self):
+        service, model = self.service([
+            ModelResponse(tool_calls=(ToolCall(id="delegate", name="delegate_task",
+                                              arguments={"task": "Investigate independently"}),)),
+            ModelResponse(content="Child findings"),
+            ModelResponse(content="Parent conclusion"),
+        ], tools=(SearchWorkspaceTool(), WriteFileTool()), skills=True)
+        session = service.create_session(workspace=str(self.root), model=None,
+                                         approval_mode=ApprovalMode.ASK)
+        started = service.start_run(session["session_id"], prompt="Main task", max_steps=3)
+        run_id = started["run_id"]
+        result = await self.wait_terminal(service, run_id)
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["output"], "Parent conclusion")
+        child_request = model.requests[1]
+        self.assertNotIn("write_file", [tool.name for tool in child_request.tools])
+        self.assertNotIn("delegate_task", [tool.name for tool in child_request.tools])
+        self.assertIn("read_skill", [tool.name for tool in child_request.tools])
+        self.assertEqual(child_request.messages[-1].content, "Investigate independently")
+        self.assertNotIn("Main task", str(child_request.messages))
+        messages = service.session_messages(session["session_id"])
+        self.assertEqual(len(messages), 4)
+        events = service.events_after(run_id, 0)
+        nested = [e for e in events if e.type == EventType.SUBAGENT_EVENT]
+        self.assertEqual(nested[-1].payload["child_type"], "subagent.finished")
+        self.assertEqual(nested[-1].payload["child_payload"]["status"], "completed")
+        self.assertTrue(all(e.run_id == run_id for e in nested))
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service=service)),
+                                     base_url="http://test") as client:
+            replay = await client.get(f"/runs/{run_id}/events")
+            self.assertIn("subagent.event", replay.text)
+            self.assertIn("child_run_id", replay.text)
+            trace = (await client.get(f"/runs/{run_id}/trace")).json()
+            self.assertEqual(len(trace["model_calls"]), 2)
+            child_events = [event for event in trace["events"] if event["type"] == "subagent.event"]
+            self.assertTrue(any(event["payload"]["child_payload"].get("content") == "Child findings"
+                                for event in child_events))
+            self.assertEqual(child_events[-1]["payload"]["child_payload"]["output"], "Child findings")
+            self.assertEqual(len(trace["tool_calls"]), 1)
+            self.assertEqual(len(trace["steps"]), 2)
+
+    async def test_parallel_subagents_persist_and_replay_without_finishing_parent(self):
+        from nemo.testing.fakes import CallbackModel, BlockingModel
+        gates = [BlockingModel(), BlockingModel()]
+        parent_progress = asyncio.Event()
+        calls = 0
+        async def respond(request):
+            nonlocal calls
+            if not any(t.name == "spawn_subagents" for t in request.tools):
+                label = next(m.content for m in request.messages if m.role == "user")
+                return await gates[int(label)].generate(request)
+            calls += 1
+            if calls == 1:
+                return ModelResponse(tool_calls=(ToolCall(id="spawn", name="spawn_subagents",
+                    arguments={"tasks": [{"task": "0"}, {"task": "1"}]}),))
+            if calls == 2:
+                payload = next(m.tool_result.output for m in request.messages if m.role == "tool")
+                parent_progress.set()
+                return ModelResponse(tool_calls=(ToolCall(id="wait", name="wait_subagents",
+                    arguments={"run_ids": [job["run_id"] for job in payload["tasks"]], "mode": "all"}),))
+            return ModelResponse(content="Parallel findings integrated")
+        model = CallbackModel(respond)
+        service = NemoApplication(SQLiteRepository(self.root / "parallel.sqlite"),
+                                  client_factory=lambda **_: model)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None,
+                                         approval_mode=ApprovalMode.FULL)
+        started = service.start_run(session["session_id"], prompt="Parent", max_steps=4)
+        run_id = started["run_id"]
+        await asyncio.wait_for(parent_progress.wait(), 1)
+        await asyncio.wait_for(asyncio.gather(*(g.started.wait() for g in gates)), 1)
+        self.assertEqual(service.get_run(run_id)["status"], "running")
+        gates[0].release.set()
+        await asyncio.wait_for(gates[0].stopped.wait(), 1)
+        self.assertEqual(service.get_run(run_id)["status"], "running")
+        gates[1].release.set()
+        result = await self.wait_terminal(service, run_id)
+        self.assertEqual(result["output"], "Parallel findings integrated")
+        events = service.events_after(run_id, 0)
+        nested = [e for e in events if e.type == EventType.SUBAGENT_EVENT]
+        self.assertEqual(len({e.payload["child_run_id"] for e in nested}), 2)
+        self.assertTrue(all(e.payload["tool_call_id"] == "spawn" for e in nested))
+        self.assertEqual(events[-1].type, "run.completed")
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service=service)), base_url="http://test") as client:
+            trace = (await client.get(f"/runs/{run_id}/trace")).json()
+            self.assertEqual(len(trace["model_calls"]), 3)
+            replay = await client.get(f"/runs/{run_id}/events")
+            self.assertIn("subagent.finished", replay.text)
+            self.assertEqual(len(service.list_sessions()), 1)
+
     async def test_skill_directory_freezes_and_resume_refreshes_without_schema_change(self):
         folder = self.root / ".nemo" / "skills" / "review"
         folder.mkdir(parents=True)
@@ -163,7 +253,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             approval_mode=ApprovalMode.FULL.value,
             user_instructions=None, project_instructions=None,
         )
-        first = service.start_run(session["session_id"], prompt="A" * 5800, max_steps=1)
+        first = service.start_run(session["session_id"], prompt="A" * 3000, max_steps=1)
         first_result = await self.wait_terminal(service, first["run_id"])
         self.assertEqual(first_result["status"], "completed", first_result.get("error"))
         second = service.start_run(session["session_id"], prompt="B" * 900, max_steps=1)

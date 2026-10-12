@@ -18,6 +18,10 @@ React UI 通过 Nemo Server 完成 Session/Run 主链，并把审批和 Trace �
 
 `App.tsx` 只组合页面；`hooks/useNemoWorkspace.ts` 管理 Session、Run、SSE 和查询状态；`components/` 分别保存 Session 导航、Conversation、Composer 与 Inspector 视图。API 协议、事件类型和数据类型继续集中维护，避免组件自行发请求。
 
+Conversation 和子任务详情默认跟随输出到底部；用户上滑或拖动滚动条离开底部时暂停，手动回到底部或点击 Jump to latest 恢复。仅移动各自的内容容器，不对整个页面使用 scrollIntoView。切换会话或子任务时重新初始化跟随状态。
+
+Activities 的子任务条目可点击进入独立详情弹窗，父对话保持挂载，关闭后返回原阅读位置。详情使用既有父事件流重建并实时更新；数据字段与历史兼容性见 [Subagents 参考](../reference/subagents.md#子任务详情)。
+
 模型正文通过 `model.delta` 在 Conversation 中逐步显示；Provider 返回的推理通过 `model.reasoning_delta` 在可折叠区域显示。Run 终止后由 Server 保存的历史替换。解析、脱敏、工具调用和断线续读的设计见 [模型流式回复](model-streaming.md)。
 
 ## 3. API 边界

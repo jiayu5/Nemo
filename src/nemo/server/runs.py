@@ -18,6 +18,7 @@ from nemo.core.contracts.errors import NemoError
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.contracts.types import Event
 from nemo.core.runtime.agent import AgentRuntime
+from nemo.core.runtime.subagents import SubagentManager
 from nemo.core.tools.approval import (
     ApprovalMode,
     ApprovalOutcome,
@@ -25,7 +26,7 @@ from nemo.core.tools.approval import (
     ApprovalRequest,
 )
 from nemo.core.tools.registry import ToolRegistry
-from nemo.prompts.system_prompt import build_system_prompt
+from nemo.prompts.system_prompt import build_subagent_system_prompt, build_system_prompt
 from nemo.server.errors import (
     ApprovalConflictError,
     ApprovalNotFoundError,
@@ -207,6 +208,23 @@ class RunManager:
             policy = ApprovalPolicy(
                 ApprovalMode(session["approval_mode"]), approver=self._approver(run_id)
             )
+            window = (
+                ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
+                if resolved is not None and resolved.context_window_tokens is not None else None
+            )
+            child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
+            subagents = SubagentManager(
+                client, child_tools, policy=policy, context_window=window,
+                context=ContextBuilder(
+                    system_prompt=build_subagent_system_prompt(
+                        workspace=session["workspace"], tools=(tool.name for tool in child_tools),
+                    ),
+                    user_instructions=session["user_instructions"],
+                    project_instructions=session["project_instructions"],
+                    skills_directory=skill_directory(catalog) if catalog is not None else "",
+                ),
+            )
+            tools = (*tools, *subagents.tools())
             registry = ToolRegistry(
                 tools,
                 context=ExecutionContext(workspace=Path(session["workspace"]),
@@ -215,7 +233,7 @@ class RunManager:
                 policy=policy,
             )
             runtime = AgentRuntime(
-                client,
+                subagents.model,
                 registry,
                 ContextBuilder(
                     system_prompt=build_system_prompt(
@@ -226,10 +244,7 @@ class RunManager:
                     project_instructions=session["project_instructions"],
                     skills_directory=skill_directory(catalog) if catalog is not None else "",
                 ),
-                context_window=(
-                    ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
-                    if resolved is not None and resolved.context_window_tokens is not None else None
-                ),
+                context_window=window,
                 checkpoint=self._checkpoint(session["session_id"]),
             )
 

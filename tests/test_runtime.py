@@ -228,3 +228,30 @@ class RuntimeTests(unittest.IsolatedAsyncioTestCase):
             ModelResponse(tool_calls=(call(), call()))
         with self.assertRaises(ValueError):
             Message(role="tool")
+
+    async def test_reserved_report_turn_returns_partial_findings_without_extra_call(self):
+        model = FakeModel([ModelResponse(tool_calls=(call(),)),
+                           ModelResponse(content="Confirmed: add returned 42. Unchecked: failure handling.")])
+        result = await AgentRuntime(model, ToolRegistry((AddTool(),))).run(
+            "Investigate", max_steps=2, finish_with_summary=True)
+        self.assert_terminal(result, RunStatus.LIMIT_REACHED)
+        self.assertIn("Confirmed", result.state.output)
+        self.assertEqual(len(model.requests), 2)
+        self.assertEqual(model.requests[0].tools[0].name, "add")
+        self.assertEqual(model.requests[1].tools, ())
+        self.assertIn("Final report turn", model.requests[1].messages[-1].content)
+        self.assertNotIn("Final report turn", str(result.state.messages))
+        self.assertEqual(result.state.messages[2].tool_result.output, 42)
+
+    async def test_reserved_report_turn_never_executes_hallucinated_tool_call(self):
+        model = FakeModel([ModelResponse(tool_calls=(call(id="first"),)),
+                           ModelResponse(tool_calls=(call(id="ignored"),))])
+        result = await AgentRuntime(model, ToolRegistry((AddTool(),))).run(
+            "Investigate", max_steps=2, finish_with_summary=True)
+        self.assert_terminal(result, RunStatus.LIMIT_REACHED)
+        self.assertTrue(result.state.output)
+        executed = [e for e in result.events if e.type == "tool.completed"]
+        self.assertEqual(len(executed), 1)
+        last = result.state.messages[-1].tool_result
+        self.assertEqual(last.tool_call_id, "ignored")
+        self.assertEqual(last.error.code, "denied")

@@ -273,6 +273,21 @@ class CliTests(unittest.TestCase):
         loaded = load_transcript(self.transcripts()[0])
         self.assertEqual([m.role for m in loaded.messages], ["user", "assistant"])
 
+    def test_direct_subagent_returns_result_and_renders_child_events(self):
+        code, output, client = self.run_cli(self.base_args("Investigate"), [
+            ModelResponse(tool_calls=(ToolCall(id="delegate", name="delegate_task",
+                                              arguments={"task": "Independent task"}),)),
+            ModelResponse(content="Child evidence"),
+            ModelResponse(content="Parent answer"),
+        ])
+        self.assertEqual(code, 0)
+        self.assertIn("subagent", output)
+        self.assertIn("Parent answer", output)
+        self.assertNotIn("delegate_task", [t.name for t in client.model.requests[1].tools])
+        loaded = load_transcript(self.transcripts()[0])
+        self.assertEqual(len(loaded.messages), 4)
+        self.assertEqual(loaded.messages[2].tool_result.output["output"], "Child evidence")
+
     def test_direct_session_reload_rediscovers_skills_and_preserves_history(self):
         folder = self.workspace / ".nemo" / "skills" / "review"
         folder.mkdir(parents=True)

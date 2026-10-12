@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { SubagentView } from "./components/SubagentView";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { Conversation } from "./components/Conversation";
@@ -12,6 +13,9 @@ export default function App() {
   const [showMemory, setShowMemory] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
+  const [subagent, setSubagent] = useState<string | null>(null);
+  const displayedRun = workspace.events[0]?.run_id ?? null;
+  useEffect(() => { setSubagent(null); }, [displayedRun, workspace.selected?.session_id]);
 
   return (
     <div className="app-shell">
@@ -72,8 +76,11 @@ export default function App() {
           trace={workspace.trace}
           events={workspace.events}
           onSelectRun={(run) => void workspace.selectRun(run)}
+          onSelectSubagent={setSubagent}
         />
       </main>
+
+      {subagent && <SubagentView runId={subagent} events={workspace.events} onClose={() => setSubagent(null)} />}
 
       {showConnections && <ConnectionsDialog settings={workspace.providerSettings}
         onSaved={workspace.refreshConfiguration} onClose={() => setShowConnections(false)} />}

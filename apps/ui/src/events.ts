@@ -20,6 +20,7 @@ export const RUN_EVENT_TYPES = [
   "approval.requested",
   "approval.resolved",
   "observer.failed",
+  "subagent.event",
 ] as const;
 
 const TERMINAL_RUN_EVENTS = new Set<string>([

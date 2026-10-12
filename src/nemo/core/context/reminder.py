@@ -62,6 +62,14 @@ def step_budget(step: int, max_steps: int) -> Reminder:
     return Reminder(name="step_budget", body=f"step {step} of {max_steps}")
 
 
+def final_report() -> Reminder:
+    """The reserved last child turn returns evidence instead of starting more work."""
+    return Reminder(name="final_report", body=(
+        "Final report turn; tools are unavailable. Return confirmed findings with evidence "
+        "and explicit unchecked items. Do not claim the entire task is complete."
+    ))
+
+
 def slot_open(state: AgentState) -> bool:
     """True when a reminder may be appended this turn."""
 
