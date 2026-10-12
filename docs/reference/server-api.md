@@ -163,4 +163,4 @@ Server 仅允许绑定 `127.0.0.1`、`localhost` 或 `::1`。命令行 Server �
 
 ## 子任务分派
 
-主 Runtime 通过 `spawn_subagents` 创建异步并行的只读子 Agent，支持查询、等待和取消；`delegate_task` 保留同步兼容。子事件以 `subagent.event` 包装在父 SSE 与 Trace 中，历史只保存分派调用及有界结果；不新增 HTTP 端点、子 Run 数据库记录或 schema。字段、限制和统计语义见 [Subagents 参考](subagents.md)。
+主 Runtime 通过 `spawn_subagents` 创建异步并行的只读子 Agent，支持查询、等待、取消和完整报告分页读取；`delegate_task` 保留同步兼容。子事件以 `subagent.event` 包装在父 SSE 与 Trace 中，历史只保存分派调用及有界结果；不新增 HTTP 端点、子 Run 数据库记录或 schema。字段、限制和统计语义见 [Subagents 参考](subagents.md)。

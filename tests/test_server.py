@@ -51,6 +51,164 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.services.append(service)
         return service, model
 
+    async def test_subagent_budget_configuration_is_loaded_for_each_run(self):
+        from nemo.core.contracts.model_config import SubagentConfig
+        config = self.config().model_copy(update={"subagents": SubagentConfig(
+            default_max_steps=22, max_steps=60, max_model_calls=240)})
+        model = FakeModel([ModelResponse(content="First"), ModelResponse(content="Second")])
+        model.resolved = ModelResolver(ModelRegistry(config)).resolve()
+        service = NemoApplication(SQLiteRepository(self.root / "budgets.sqlite"),
+                                  client_factory=lambda **_: model, config_loader=lambda: config)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        for default, cap, total in ((22, 60, 240), (7, 12, 80)):
+            config = config.model_copy(update={"subagents": SubagentConfig(
+                default_max_steps=default, max_steps=cap, max_model_calls=total)})
+            started = service.start_run(session["session_id"], prompt="Test", max_steps=1)
+            result = await self.wait_terminal(service, started["run_id"])
+            self.assertEqual(result["status"], "completed")
+            tool = next(t for t in model.requests[-1].tools if t.name == "delegate_task")
+            schema = tool.parameters["properties"]["max_steps"]
+            self.assertEqual((schema["default"], schema["maximum"]), (default, cap))
+            self.assertIn(str(total) + " model calls", tool.description)
+
+    async def test_full_subagent_report_survives_persisted_trace_replay(self):
+        report = "完整证据\n" * 2500 + "REPORT-TAIL"
+        service, model = self.service([
+            ModelResponse(tool_calls=(ToolCall(id="delegate", name="delegate_task", arguments={"task": "Inspect"}),)),
+            ModelResponse(content=report), ModelResponse(content="Parent summary"),
+        ])
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        run = service.start_run(session["session_id"], prompt="Main task", max_steps=3)
+        result = await self.wait_terminal(service, run["run_id"])
+        self.assertEqual(result["status"], "completed")
+        replay = service.events_after(run["run_id"], 0)
+        chunks = [e.payload["child_payload"] for e in replay if e.type == "subagent.event"
+                  and e.payload["child_type"] == "subagent.report"]
+        self.assertEqual("".join(c["text"] for c in chunks), report)
+        self.assertTrue(all(len(c["text"]) <= 4000 for c in chunks))
+        tool_result = service.session_messages(session["session_id"])[2].tool_result.output
+        self.assertEqual(tool_result["report_chars"], len(report))
+        self.assertTrue(tool_result["output_truncated"])
+        self.assertNotIn("REPORT-TAIL", tool_result["output"])
+
+    async def test_resume_round_trip_preserves_context_and_report_rounds_in_trace(self):
+        from nemo.testing.fakes import CallbackModel
+        parent_calls = 0
+        first_report = "First partial report"
+        second_report = "Follow-up report"
+        async def respond(request):
+            nonlocal parent_calls
+            if not any(t.name == "resume_subagent" for t in request.tools):
+                users = [m.content for m in request.messages if m.role == "user"]
+                if users[-1] == "Follow-up":
+                    self.assertEqual(users, ["Child task", "Follow-up"])
+                    self.assertTrue(any(m.content == first_report for m in request.messages))
+                    return ModelResponse(content=second_report)
+                return ModelResponse(content=first_report)
+            parent_calls += 1
+            outputs = [m.tool_result.output for m in request.messages if m.tool_result and m.tool_result.output]
+            if parent_calls == 1:
+                return ModelResponse(tool_calls=(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Child task", "max_steps": 1}]}),))
+            child_id = outputs[0]["tasks"][0]["run_id"]
+            if parent_calls in {2, 4}:
+                return ModelResponse(tool_calls=(ToolCall(id=f"wait-{parent_calls}", name="wait_subagents", arguments={"run_ids": [child_id], "mode": "all"}),))
+            if parent_calls == 3:
+                return ModelResponse(tool_calls=(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": child_id, "prompt": "Follow-up", "max_steps": 2}),))
+            if parent_calls == 5:
+                return ModelResponse(tool_calls=tuple(ToolCall(id=f"read-{n}", name="read_subagent_report", arguments={"run_id": child_id, "round": n}) for n in (1, 2)))
+            return ModelResponse(content="All rounds reviewed")
+        model = CallbackModel(respond)
+        service = NemoApplication(SQLiteRepository(self.root / "resume.sqlite"), client_factory=lambda **_: model)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        run = service.start_run(session["session_id"], prompt="Main", max_steps=8)
+        result = await self.wait_terminal(service, run["run_id"])
+        self.assertEqual(result["status"], "completed")
+        nested = [e for e in service.events_after(run["run_id"], 0) if e.type == "subagent.event"]
+        self.assertEqual(len({e.payload["child_run_id"] for e in nested}), 1)
+        self.assertEqual([e.payload["child_seq"] for e in nested], list(range(1, len(nested) + 1)))
+        self.assertTrue(all(e.payload["tool_call_id"] == "resume" for e in nested if e.payload["child_payload"]["round"] == 2))
+        finished = [e for e in nested if e.payload["child_type"] == "subagent.finished"]
+        self.assertEqual([e.payload["child_payload"]["status"] for e in finished], ["limit_reached", "completed"])
+        self.assertEqual([e.payload["child_step"] for e in finished], [1, 2])
+        reports = [e.payload["child_payload"] for e in nested if e.payload["child_type"] == "subagent.report"]
+        self.assertEqual([(r["round"], r["text"]) for r in reports], [(1, first_report), (2, second_report)])
+        reads = [m.tool_result.output for m in service.session_messages(session["session_id"])
+                 if m.tool_result and m.tool_result.tool_call_id.startswith("read-")]
+        self.assertEqual([r["text"] for r in reads], [first_report, second_report])
+        self.assertTrue(all(r["next_offset"] is None for r in reads))
+
+    async def test_sse_disconnect_leaves_owned_subagents_running_until_explicit_cancel(self):
+        from nemo.testing.fakes import CallbackModel, BlockingModel
+        from nemo.server.app import _sse
+        from starlette.requests import Request
+        child, parent = BlockingModel(), BlockingModel()
+        parent_calls = 0
+        async def respond(request):
+            nonlocal parent_calls
+            if not any(t.name == "spawn_subagents" for t in request.tools):
+                return await child.generate(request)
+            parent_calls += 1
+            if parent_calls == 1:
+                return ModelResponse(tool_calls=(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Child"}]}),))
+            return await parent.generate(request)
+        model = CallbackModel(respond)
+        close_checks = []
+        async def close():
+            close_checks.append(child.stopped.is_set() and parent.stopped.is_set())
+        model.aclose = close
+        service = NemoApplication(SQLiteRepository(self.root / "disconnect.sqlite"), client_factory=lambda **_: model)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        started = service.start_run(session["session_id"], prompt="Main", max_steps=6)
+        await asyncio.wait_for(asyncio.gather(child.started.wait(), parent.started.wait()), 1)
+        async def receive():
+            return {"type": "http.disconnect"}
+        stream = _sse(service, started["run_id"], 0, Request({"type": "http"}, receive=receive))
+        with self.assertRaises(StopAsyncIteration):
+            await anext(stream)
+        self.assertEqual(service.get_run(started["run_id"])["status"], "running")
+        self.assertFalse(child.stopped.is_set())
+        service.cancel_run(started["run_id"])
+        result = await self.wait_terminal(service, started["run_id"])
+        self.assertEqual(result["status"], "cancelled")
+        self.assertTrue(child.stopped.is_set())
+        self.assertEqual(close_checks, [True])
+        events = service.events_after(started["run_id"], 0)
+        self.assertEqual(events[-1].type, "run.cancelled")
+        self.assertTrue(any(e.type == "subagent.event" and e.payload["child_type"] == "subagent.finished" for e in events))
+
+    async def test_server_shutdown_drains_subagents_before_closing_client(self):
+        from nemo.testing.fakes import CallbackModel, BlockingModel
+        child, parent = BlockingModel(), BlockingModel()
+        parent_calls = 0
+        async def respond(request):
+            nonlocal parent_calls
+            if not any(t.name == "spawn_subagents" for t in request.tools):
+                return await child.generate(request)
+            parent_calls += 1
+            if parent_calls == 1:
+                return ModelResponse(tool_calls=(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Child"}]}),))
+            return await parent.generate(request)
+        model = CallbackModel(respond)
+        close_checks = []
+        async def close():
+            close_checks.append(child.stopped.is_set() and parent.stopped.is_set())
+        model.aclose = close
+        path = self.root / "shutdown-children.sqlite"
+        service = NemoApplication(SQLiteRepository(path), client_factory=lambda **_: model)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        service.start_run(session["session_id"], prompt="Main", max_steps=6)
+        try:
+            await asyncio.wait_for(asyncio.gather(child.started.wait(), parent.started.wait()), 1)
+        finally:
+            await service.shutdown()
+        self.assertTrue(child.stopped.is_set())
+        self.assertEqual(close_checks, [True])
+        with sqlite3.connect(path) as connection:
+            self.assertEqual(connection.execute("SELECT status FROM runs").fetchone()[0], "interrupted")
+
     async def test_subagent_round_trip_persists_nested_trace_without_child_session(self):
         service, model = self.service([
             ModelResponse(tool_calls=(ToolCall(id="delegate", name="delegate_task",
@@ -232,7 +390,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
     async def test_compaction_checkpoint_is_reused_across_server_runs(self):
         config = self.config()
         model_config = config.models["demo-model"].model_copy(
-            update={"context_window_tokens": 12000, "response_reserve_tokens": 2048}
+            update={"context_window_tokens": 32768, "response_reserve_tokens": 2048}
         )
         config = config.model_copy(update={"models": {"demo-model": model_config}})
         model = FakeModel([
@@ -253,10 +411,10 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             approval_mode=ApprovalMode.FULL.value,
             user_instructions=None, project_instructions=None,
         )
-        first = service.start_run(session["session_id"], prompt="A" * 3000, max_steps=1)
+        first = service.start_run(session["session_id"], prompt="A" * 15000, max_steps=1)
         first_result = await self.wait_terminal(service, first["run_id"])
         self.assertEqual(first_result["status"], "completed", first_result.get("error"))
-        second = service.start_run(session["session_id"], prompt="B" * 900, max_steps=1)
+        second = service.start_run(session["session_id"], prompt="B" * 9000, max_steps=1)
         self.assertEqual((await self.wait_terminal(service, second["run_id"]))["status"], "completed")
         events = service.events_after(second["run_id"], 0)
         self.assertIn(EventType.CONTEXT_COMPACTED, [event.type for event in events])

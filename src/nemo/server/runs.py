@@ -19,6 +19,7 @@ from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.contracts.types import Event
 from nemo.core.runtime.agent import AgentRuntime
 from nemo.core.runtime.subagents import SubagentManager
+from nemo.core.contracts.model_config import SubagentConfig
 from nemo.core.tools.approval import (
     ApprovalMode,
     ApprovalOutcome,
@@ -187,8 +188,9 @@ class RunManager:
             self.repository.set_run_running(run_id)
             client = self._client_factory(run_override=session["model"])
             resolved = getattr(client, "resolved", None)
+            config = self._config_loader() if resolved is not None else None
             if resolved is not None:
-                provider = self._config_loader().models[resolved.model_name].provider
+                provider = config.models[resolved.model_name].provider
                 self.repository.set_run_model(
                     run_id,
                     selection=resolved.selection,
@@ -215,6 +217,7 @@ class RunManager:
             child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
             subagents = SubagentManager(
                 client, child_tools, policy=policy, context_window=window,
+                limits=config.subagents if config is not None else SubagentConfig(),
                 context=ContextBuilder(
                     system_prompt=build_subagent_system_prompt(
                         workspace=session["workspace"], tools=(tool.name for tool in child_tools),

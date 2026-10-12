@@ -52,3 +52,37 @@ it("keeps the child reader's scroll position while more output arrives", () => {
   fireEvent.click(screen.getByRole("button", { name: "Jump to latest" }));
   expect(node.scrollTop).toBe(800);
 });
+
+it("replays the full report from chunks instead of the finished preview", () => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  render(<SubagentView runId="child" events={[
+    event(1, "subagent.report", { offset: 0, text: "Full report beginning. " }),
+    event(2, "subagent.report", { offset: 23, text: "Previously missing tail." }),
+    event(3, "subagent.finished", { status: "completed", output: "Truncated preview" }),
+  ]} onClose={() => {}} />);
+  expect(screen.getByText("Full report beginning. Previously missing tail.")).toBeVisible();
+  expect(screen.queryByText("Truncated preview")).toBeNull();
+});
+
+it("keeps earlier reports and separates continuation steps during live updates", () => {
+  HTMLDialogElement.prototype.showModal = function () { this.open = true; };
+  const initial = [event(1, "subagent.queued", { task: "Inspect", round: 1 }),
+    event(2, "subagent.report", { offset: 0, text: "Original findings", round: 1 }),
+    event(3, "subagent.finished", { status: "limit_reached", output: "Original preview", round: 1 })];
+  const view = render(<SubagentView runId="child" events={initial} onClose={() => {}} />);
+  const resumed = [...initial, event(4, "subagent.resumed", { prompt: "Check the remaining cases", round: 2 })];
+  view.rerender(<SubagentView runId="child" events={resumed} onClose={() => {}} />);
+  expect(screen.getByText("queued · read-only · round 2")).toBeVisible();
+  expect(screen.getByText("Original findings")).toBeVisible();
+  expect(screen.getByText("Check the remaining cases")).toBeVisible();
+  const delta = event(5, "model.delta", { text: "Follow-up work", round: 2 });
+  delta.payload.child_step = 2;
+  view.rerender(<SubagentView runId="child" events={[...resumed, delta,
+    event(6, "subagent.report", { offset: 0, text: "Follow-up findings", round: 2 }),
+    event(7, "subagent.finished", { status: "completed", round: 2 })]} onClose={() => {}} />);
+  expect(screen.getByText("Original findings")).toBeVisible();
+  expect(screen.getByText("Follow-up findings")).toBeVisible();
+  expect(screen.getByText("Follow-up work")).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Round 1 · limit_reached" })).toBeVisible();
+  expect(screen.getByRole("heading", { name: "Round 2 · completed" })).toBeVisible();
+});

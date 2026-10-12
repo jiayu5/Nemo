@@ -15,6 +15,7 @@ from nemo.cli.render import render_event
 from nemo.cli.streams import Streams
 from nemo.cli.transcript import SessionHeader, append_compaction, append_messages, list_sessions, load_transcript, write_header
 from nemo.config.secrets import SecretLoader
+from nemo.config.loader import load_config
 from nemo.core.context.builder import DEFAULT_MAX_INSTRUCTIONS_CHARS, ContextBuilder
 from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
 from nemo.core.contracts.tools import ExecutionContext
@@ -66,6 +67,7 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
     subagents = SubagentManager(
         client, child_tools, policy=policy, context_window=window,
+        limits=load_config().subagents,
         context=ContextBuilder(
             system_prompt=build_subagent_system_prompt(
                 workspace=workspace, tools=(tool.name for tool in child_tools),

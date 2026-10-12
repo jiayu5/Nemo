@@ -12,17 +12,19 @@ interface Props {
 export function InspectorPanel({
   runs, trace, events, onSelectRun, onSelectSubagent,
 }: Props) {
-  const children = new Map<string, { status: string; step: number }>();
+  const children = new Map<string, { status: string; step: number; round: number }>();
   for (const event of events) {
     if (event.type !== "subagent.event" || typeof event.payload.child_run_id !== "string") continue;
     const id = event.payload.child_run_id;
-    const child = children.get(id) ?? { status: "queued", step: 0 };
+    const child = children.get(id) ?? { status: "queued", step: 0, round: 1 };
     child.step = Number(event.payload.child_step ?? child.step);
+    const payload = event.payload.child_payload as Record<string, unknown> | undefined;
+    child.round = Number(payload?.round ?? child.round);
     const type = String(event.payload.child_type ?? "");
+    if (type === "subagent.resumed") child.status = "queued";
     if (type === "run.started") child.status = "running";
     else if (type.startsWith("run.") && type !== "run.started") child.status = type.slice(4);
     else if (type === "subagent.finished") {
-      const payload = event.payload.child_payload as Record<string, unknown> | undefined;
       child.status = String(payload?.status ?? child.status);
     }
     children.set(id, child);
@@ -57,7 +59,7 @@ export function InspectorPanel({
       {[...children].map(([id, child]) => <button type="button" className="subagent-status" key={id} aria-label={`View subagent ${id}`}
         onClick={() => onSelectSubagent?.(id)}>
         <span>Subagent {id.slice(0, 7)}</span><span className={`status-dot ${child.status}`} />
-        <small>{child.status} · step {child.step}</small>
+        <small>{child.status} · step {child.step}{child.round > 1 ? ` · round ${child.round}` : ""}</small>
       </button>)}
     </section>}
     <div className="event-list">

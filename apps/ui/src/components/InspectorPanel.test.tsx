@@ -28,3 +28,13 @@ it("shows separate concurrent child states and updates them from replayed events
   expect(children.getByText("cancelled · step 1")).toBeVisible();
   expect(screen.queryByText(/model.delta/)).toBeNull();
 });
+
+it("shows a resumed child queued with its cumulative step count", () => {
+  const resumed = event(2, "aaaaaaa", "subagent.resumed");
+  resumed.payload.child_step = 20;
+  resumed.payload.child_payload = { round: 2 };
+  render(<InspectorPanel runs={[]} trace={null} onSelectRun={() => {}} events={[
+    event(1, "aaaaaaa", "subagent.finished", "limit_reached"), resumed,
+  ]} />);
+  expect(screen.getByText("queued · step 20 · round 2")).toBeVisible();
+});

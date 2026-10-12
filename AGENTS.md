@@ -4,7 +4,7 @@
 
 Nemo 是个人 Agent OS 与 Agent 技术实验平台：基础设施使用成熟库，Agent Runtime 与核心智能机制自行实现。
 
-Phase 2 的 M9 长期记忆与项目说明继承已交付，Phase 3 的 M10 Skills 已实现，M11 Subagents 正在推进，异步并行只读分派已实现，真实模型待验收。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
+Phase 2 的 M9 长期记忆与项目说明继承已交付，Phase 3 的 M10 Skills 已实现，M11 Subagents 正在推进，异步并行只读分派已实现，真实模型首轮复验完成。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
 
 ## 目录职责
 

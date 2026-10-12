@@ -216,6 +216,10 @@ def render_toml(config: AppConfig) -> str:
 
     lines = [f"default = {_toml_value(config.default)}",
              f"memory_enabled = {_toml_value(config.memory_enabled)}", ""]
+    lines.append("[subagents]")
+    for key, value in config.subagents.model_dump().items():
+        lines.append(f"{key} = {_toml_value(value)}")
+    lines.append("")
     for name, provider in config.providers.items():
         lines.extend(
             [

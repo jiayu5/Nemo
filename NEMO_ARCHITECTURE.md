@@ -210,7 +210,9 @@ flowchart LR
 
 Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。M11 Subagents 已实现异步并行只读分派，机制见 [Subagents 设计](docs/design/subagents.md)；其他能力尚未排定里程碑。
 
-Subagent 复用同一个 Runtime，拥有独立状态、上下文、只读工具集合和步数/时间限制；父 Run 管理并行生命周期、查询/等待/取消及共享调用预算；子任务预留预算内的最后一步返回部分报告，UI 可基于父事件流查看独立执行详情；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
+Subagent 复用同一个 Runtime，拥有独立状态、上下文、只读工具集合和步数/时间限制；父 Run 管理并行生命周期、查询/等待/取消及共享调用预算；子任务预留预算内的最后一步返回部分报告，最终报告可分页读取，父 Agent 可在同一 Run 内为已结束的子任务续轮并回读各轮报告，UI 基于父事件流的分块报告按轮还原全文并查看独立执行详情；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
+
+M11 的子任务步数默认值、上限和父子共享模型调用预算现已支持用户配置，父模型通过结构化工具参数选择各任务步数；配置与生效规则见 [配置参考](docs/reference/configuration.md#subagents-预算)。
 
 ## 8. Roadmap
 

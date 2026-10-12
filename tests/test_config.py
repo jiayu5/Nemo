@@ -52,6 +52,20 @@ class ConfigTestCase(unittest.TestCase):
 
 
 class LoaderTests(ConfigTestCase):
+    def test_subagent_defaults_and_configuration_survive_editor_round_trip(self):
+        original = load_config(self.write(VALID_CONFIG))
+        self.assertEqual(original.subagents.default_max_steps, 15)
+        config = load_config(self.write(VALID_CONFIG + "\n[subagents]\ndefault_max_steps = 22\nmax_steps = 60\nmax_model_calls = 240\n"))
+        reloaded = load_config(self.write(render_toml(config)))
+        self.assertEqual(reloaded.subagents, config.subagents)
+
+    def test_invalid_subagent_limits_are_rejected(self):
+        for fields in ("default_max_steps = 0", "max_steps = true",
+                       "default_max_steps = 41", "max_model_calls = 40",
+                       "max_steps = 2.5", "max_model_calls = -1", "unknown = 1"):
+            with self.subTest(fields=fields), self.assertRaises(ConfigError):
+                load_config(self.write(VALID_CONFIG + "\n[subagents]\n" + fields))
+
     def test_context_window_round_trips_and_reserve_is_validated(self):
         source = VALID_CONFIG.replace(
             'capabilities = ["tool_calling"]',

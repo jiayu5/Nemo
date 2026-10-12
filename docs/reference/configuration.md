@@ -6,7 +6,7 @@
 
 | 位置 | 内容 | 是否可含密钥 |
 |---|---|---|
-| `~/.nemo/config.toml` | Provider、Model、Alias、Profile、默认选择与记忆开关 | 否 |
+| `~/.nemo/config.toml` | Provider、Model、Alias、Profile、默认选择、记忆开关与子任务预算 | 否 |
 | `~/.nemo/.env` | Provider API Key | 是，权限必须为 `600` |
 | 进程环境变量 | 临时覆盖 API Key、HTTP Proxy、证书环境 | 是，优先级最高 |
 
@@ -127,3 +127,20 @@ Provider 设置了 `proxy_env` 后，Nemo 使用与 API Key 相同的解析顺�
 ## 长期记忆开关
 
 顶层 `memory_enabled` 控制模型的记忆读写，默认 `true`。存储与管理语义见 [Memory 参考](memory.md)。
+
+## Subagents 预算
+
+用户在 `~/.nemo/config.toml` 中设置默认值和硬上限；无需每次分派手工配置。未配置本节时使用下列默认值：
+
+```toml
+[subagents]
+default_max_steps = 15
+max_steps = 40
+max_model_calls = 160
+```
+
+三个字段均为严格正整数，不接受布尔值或字符串。`default_max_steps` 不得超过 `max_steps`；`max_model_calls` 必须大于 `max_steps`，为父任务留出调用空间。父 Agent 在工具调用的结构化参数 `max_steps` 中按复杂度选择步数；省略使用默认值，超出上限整批拒绝，不启动子任务。每一步为一次子 Runtime 模型调用，包含最后的汇总步骤；压缩另计入共享预算。
+
+默认值与上限写入本 Run 的工具 schema，共享调用预算写入分派工具说明。Server 在每个新 Run 装配时读取配置，当前 Run 不受中途修改影响；直连 CLI 在启动时读取，修改后需重新启动。Connections 暂无这些字段的编辑入口，但保存 Provider/Model 或记忆开关会保留本节。
+
+共享预算覆盖父、子和压缩请求，限制请求次数而非 token 或费用；失败和取消的请求也计数。它不预先按子任务分配额度，不能保证每个任务用满指定步数。并行任务或多批分派需要相应提高共享预算；超时、取消与父 Run 结束仍可提前终止。现行运行规则见 [Subagents](subagents.md)。

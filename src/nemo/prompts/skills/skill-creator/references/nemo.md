@@ -18,7 +18,7 @@ agents/openai.yaml 的名称及格式保留原版兼容性；生成器可生成�
 
 初始化及校验脚本已适配 Nemo 受限格式，使用已安装的 Nemo 解析器，无需 PyYAML。校验还检查未完成占位内容、目录资源及链接；新增业务脚本仍需实际测试。脚本脚手架的 TODO 是待完成内容，不能作为最终交付。
 
-Nemo 已提供 spawn_subagents、get_subagents、wait_subagents 和 cancel_subagent，可在复杂度或风险值得独立检查、且已获授权时进行只读验证。子 Agent 不能写文件、执行 Shell 或递归分派；需要生成验证产物或运行脚本时由父 Agent 完成，再把任务及必要路径明确交给子 Agent 检查。最终报告只列实际完成的验证。
+Nemo 已提供 spawn_subagents、get_subagents、wait_subagents、cancel_subagent、read_subagent_report 和 resume_subagent，可在复杂度或风险值得独立检查、且已获授权时进行只读验证。子 Agent 不能写文件、执行 Shell 或递归分派；需要生成验证产物或运行脚本时由父 Agent 完成，再把任务及必要路径明确交给子 Agent 检查。最终报告只列实际完成的验证。
 
 ## 会话生效
 

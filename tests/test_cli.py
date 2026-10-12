@@ -224,6 +224,11 @@ class CliTests(unittest.TestCase):
         from nemo.adapters.memory import FileMemoryStore
         from unittest.mock import patch
         memory_patch = patch("nemo.cli.direct.build_memory_store", return_value=FileMemoryStore(self.workspace / "memory", settings=FakeMemorySettings()))
+        from types import SimpleNamespace
+        from nemo.core.contracts.model_config import SubagentConfig
+        config_patch = patch("nemo.cli.direct.load_config", return_value=SimpleNamespace(subagents=SubagentConfig()))
+        config_patch.start()
+        self.addCleanup(config_patch.stop)
         memory_patch.start()
         self.addCleanup(memory_patch.stop)
         from nemo.adapters.skills import FileSkillCatalog
@@ -272,6 +277,19 @@ class CliTests(unittest.TestCase):
         self.assertIn("status  : completed", output)
         loaded = load_transcript(self.transcripts()[0])
         self.assertEqual([m.role for m in loaded.messages], ["user", "assistant"])
+
+    def test_direct_cli_uses_configured_subagent_limits(self):
+        from unittest.mock import patch
+        from types import SimpleNamespace
+        from nemo.core.contracts.model_config import SubagentConfig
+        config = SimpleNamespace(subagents=SubagentConfig(default_max_steps=22, max_steps=60, max_model_calls=240))
+        with patch("nemo.cli.direct.load_config", return_value=config):
+            code, _, client = self.run_cli(self.base_args("Test"), [ModelResponse(content="Done")])
+        self.assertEqual(code, 0)
+        tool = next(t for t in client.model.requests[0].tools if t.name == "delegate_task")
+        self.assertEqual(tool.parameters["properties"]["max_steps"]["default"], 22)
+        self.assertEqual(tool.parameters["properties"]["max_steps"]["maximum"], 60)
+        self.assertIn("240 model calls", tool.description)
 
     def test_direct_subagent_returns_result_and_renders_child_events(self):
         code, output, client = self.run_cli(self.base_args("Investigate"), [

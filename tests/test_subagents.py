@@ -38,7 +38,7 @@ class SubagentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(output["status"], "completed")
         self.assertNotEqual(output["run_id"], result.state.run_id)
         nested = [e for e in result.events if e.type == EventType.SUBAGENT_EVENT]
-        self.assertEqual(nested[-1].payload["child_type"], "run.completed")
+        self.assertEqual(nested[-1].payload["child_type"], "subagent.finished")
         self.assertTrue(all(e.run_id == result.state.run_id for e in result.events))
         self.assertEqual([e.seq for e in result.events], list(range(1, len(result.events) + 1)))
         self.assertEqual(sum(e.type == EventType.RUN_COMPLETED for e in result.events), 1)
@@ -68,7 +68,7 @@ class SubagentTests(unittest.IsolatedAsyncioTestCase):
             ModelResponse(content="Denied"),
         ])
         context = ExecutionContext(workspace=Path.cwd(), session_id="parent-session", run_id="parent",
-                                   source_message_index=2, max_output_chars=40)
+                                   source_message_index=2, max_output_chars=800)
         output = await self.registry(child, tools=(AddTool(),), policy=DenyPolicy(), context=context).execute(delegate())
         self.assertEqual(output.output["status"], "completed")
         self.assertEqual(decisions[0][1].workspace, context.workspace)
@@ -95,7 +95,7 @@ class SubagentTests(unittest.IsolatedAsyncioTestCase):
     async def test_invalid_budget_and_task_do_not_run_child(self):
         child = FakeModel([])
         registry = self.registry(child)
-        for args in ({"max_steps": 0}, {"max_steps": 11}, {"max_steps": True},
+        for args in ({"max_steps": 0}, {"max_steps": 41}, {"max_steps": True},
                      {"task": ""}, {"task": "x" * 16001}, {"extra": 1}):
             result = await registry.execute(delegate(**args))
             self.assertEqual(result.error.code, "invalid_arguments")
@@ -118,7 +118,7 @@ class SubagentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(child.stopped.is_set())
         self.assertEqual(result.state.status, RunStatus.CANCELLED)
         nested = [e.payload["child_type"] for e in result.events if e.type == EventType.SUBAGENT_EVENT]
-        self.assertEqual(nested[-1], "run.cancelled")
+        self.assertEqual(nested[-1], "subagent.finished")
 
     async def test_external_task_cancellation_propagates(self):
         child = BlockingModel()
@@ -138,14 +138,275 @@ class SubagentTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(child.stopped.is_set())
 
     async def test_output_is_bounded_and_marked(self):
-        context = ExecutionContext(workspace=Path.cwd(), max_output_chars=20)
-        child = FakeModel([ModelResponse(content="x" * 200)])
+        context = ExecutionContext(workspace=Path.cwd(), max_output_chars=800)
+        child = FakeModel([ModelResponse(content="x" * 3000)])
         result = await self.registry(child, context=context).execute(delegate())
         self.assertIn("truncated", result.output["output"])
-        self.assertLess(len(result.output["output"]), 200)
+        self.assertLess(len(result.output["output"]), 800)
+        self.assertTrue(result.output["output_truncated"])
+        self.assertEqual(result.output["report_chars"], 3000)
 
 
 class ParallelSubagentTests(unittest.IsolatedAsyncioTestCase):
+    async def test_configured_schema_defaults_cap_and_explicit_budgets(self):
+        from nemo.core.contracts.model_config import SubagentConfig
+        from nemo.core.runtime.subagents import SubagentManager
+        manager = SubagentManager(FakeModel([ModelResponse(content="done"), ModelResponse(content="done")]),
+                                  (), context=ContextBuilder(system_prompt="Child"), policy=ReadOnlyPolicy(),
+                                  limits=SubagentConfig(default_max_steps=22, max_steps=60, max_model_calls=240))
+        self.addAsyncCleanup(manager.end_run)
+        registry = ToolRegistry(manager.tools(), context=ExecutionContext(workspace=Path.cwd()))
+        manager.begin_run()
+        schema = next(t.parameters for t in registry.schemas() if t.name == "spawn_subagents")
+        step_schema = schema["$defs"]["DelegateArguments"]["properties"]["max_steps"]
+        self.assertEqual((step_schema["default"], step_schema["maximum"]), (22, 60))
+        self.assertEqual(manager.budget.limit, 240)
+        for value in (61, 0, True, "30"):
+            refused = await registry.execute(ToolCall(id="bad", name="spawn_subagents",
+                arguments={"tasks": [{"task": "valid"}, {"task": "invalid", "max_steps": value}]}))
+            self.assertEqual(refused.error.code, "invalid_arguments")
+            self.assertEqual(manager.jobs, {})
+            self.assertEqual(manager.budget.used, 0)
+        events = []
+        accepted = await registry.execute(ToolCall(id="ok", name="spawn_subagents",
+            arguments={"tasks": [{"task": "Default"}, {"task": "Explicit", "max_steps": 50}]}), on_event=events.append)
+        self.assertIsNone(accepted.error)
+        self.assertEqual([e.payload["max_steps"] for e in events], [22, 50])
+        await asyncio.gather(*(j.worker for j in manager.jobs.values()))
+        self.assertEqual(manager.budget.used, 2)
+
+
+    async def test_full_report_pages_and_events_preserve_tail_with_small_output_limit(self):
+        import json
+        report = ('中文证据\n"quoted"\t' * 1000) + "END-OF-REPORT"
+        manager, registry = self.setup_manager(FakeModel([ModelResponse(content=report)]),
+            context=ExecutionContext(workspace=Path.cwd(), run_id="parent", max_output_chars=700))
+        manager.begin_run()
+        events = []
+        spawn = await registry.execute(ToolCall(id="spawn", name="spawn_subagents",
+            arguments={"tasks": [{"task": "Inspect", "max_steps": 1}]}), on_event=events.append)
+        child_id = spawn.output["tasks"][0]["run_id"]
+        await asyncio.gather(*(j.worker for j in manager.jobs.values()))
+        preview = await registry.execute(ToolCall(id="get", name="get_subagents", arguments={}))
+        item = preview.output["tasks"][0]
+        self.assertEqual(item["report_chars"], len(report))
+        self.assertTrue(item["output_truncated"])
+        self.assertEqual(item["status"], "limit_reached")
+        self.assertNotIn("END-OF-REPORT", item["output"])
+        offset, chunks = 0, []
+        while True:
+            page = await registry.execute(ToolCall(id="read", name="read_subagent_report",
+                arguments={"run_id": child_id, "offset": offset, "limit": 8000}))
+            self.assertIsNone(page.error)
+            self.assertLessEqual(len(json.dumps(page.output, ensure_ascii=False)), 700)
+            chunks.append(page.output["text"])
+            next_offset = page.output["next_offset"]
+            if next_offset is None:
+                break
+            self.assertGreater(next_offset, offset)
+            offset = next_offset
+        self.assertEqual("".join(chunks), report)
+        stored = [e for e in events if e.type == "subagent.report"]
+        self.assertTrue(all(len(e.payload["text"]) <= 4000 for e in stored))
+        self.assertEqual("".join(e.payload["text"] for e in stored), report)
+        self.assertEqual(manager.budget.used, 1)
+        invalid = await registry.execute(ToolCall(id="bad", name="read_subagent_report",
+            arguments={"run_id": child_id, "offset": len(report) + 1}))
+        self.assertEqual(invalid.error.code, "execution_error")
+        other = registry.context.model_copy(update={"run_id": "other"})
+        from nemo.core.runtime.subagents import ReadReportArguments
+        from nemo.core.contracts.errors import ToolFailure
+        with self.assertRaises(ToolFailure):
+            manager.read_report(ReadReportArguments(run_id=child_id), other)
+        await manager.end_run()
+        with self.assertRaises(ToolFailure):
+            manager.read_report(ReadReportArguments(run_id=child_id), registry.context)
+
+    async def test_report_not_ready_unknown_and_empty_reports(self):
+        manager, registry = self.setup_manager(BlockingModel())
+        manager.begin_run()
+        spawned = await registry.execute(ToolCall(id="spawn", name="spawn_subagents",
+            arguments={"tasks": [{"task": "wait"}]}))
+        child_id = spawned.output["tasks"][0]["run_id"]
+        for args in ({"run_id": child_id}, {"run_id": "unknown"}):
+            result = await registry.execute(ToolCall(id="read", name="read_subagent_report", arguments=args))
+            self.assertEqual(result.error.code, "execution_error")
+        await manager.cancel(list(manager.jobs.values()))
+        result = await registry.execute(ToolCall(id="read", name="read_subagent_report", arguments={"run_id": child_id}))
+        self.assertEqual(result.output["text"], "")
+        self.assertEqual(result.output["total_chars"], 0)
+        self.assertIsNone(result.output["next_offset"])
+        for args in ({"offset": -1}, {"offset": True}, {"limit": 0}, {"limit": 8001}):
+            result = await registry.execute(ToolCall(id="read", name="read_subagent_report",
+                arguments={"run_id": child_id, **args}))
+            self.assertEqual(result.error.code, "invalid_arguments")
+
+    async def test_resume_preserves_history_reports_identity_and_cumulative_budget(self):
+        model = FakeModel([
+            ModelResponse(tool_calls=(ToolCall(id="a", name="add", arguments={"a": 20, "b": 22}),)),
+            ModelResponse(content="42 confirmed; negative inputs unchecked."),
+            ModelResponse(content="Continued with prior evidence."),
+        ])
+        manager, registry = self.setup_manager(model)
+        manager.begin_run()
+        first_events, second_events = [], []
+        spawned = await registry.execute(ToolCall(id="spawn", name="spawn_subagents",
+            arguments={"tasks": [{"task": "Inspect", "max_steps": 2}]}), on_event=first_events.append)
+        child_id = spawned.output["tasks"][0]["run_id"]
+        job = manager.jobs[child_id]
+        await job.worker
+        runtime = job.runtime
+        self.assertEqual(job.status, "limit_reached")
+        self.assertEqual(manager.budget.used, 2)
+        resumed = await registry.execute(ToolCall(id="resume", name="resume_subagent",
+            arguments={"run_id": child_id, "prompt": "Check the remaining inputs", "max_steps": 3}), on_event=second_events.append)
+        self.assertIsNone(resumed.error)
+        self.assertEqual(resumed.output["tasks"][0]["round"], 2)
+        old = await registry.execute(ToolCall(id="report", name="read_subagent_report", arguments={"run_id": child_id, "round": 1}))
+        self.assertIn("negative inputs unchecked", old.output["text"])
+        duplicate = await registry.execute(ToolCall(id="dup", name="resume_subagent", arguments={"run_id": child_id}))
+        self.assertEqual(duplicate.error.code, "execution_error")
+        await job.worker
+        self.assertIs(job.runtime, runtime)
+        self.assertEqual((job.status, job.steps, len(manager.jobs), manager.budget.used), ("completed", 3, 1, 3))
+        history = model.requests[2].messages
+        self.assertEqual([m.content for m in history if m.role == "user"], ["Inspect", "Check the remaining inputs"])
+        self.assertTrue(any(m.tool_result and m.tool_result.output == 42 for m in history))
+        self.assertTrue(any(m.content == "42 confirmed; negative inputs unchecked." for m in history))
+        self.assertEqual([e.seq for e in first_events + second_events], list(range(1, job.seq + 1)))
+        self.assertEqual(second_events[0].type, "subagent.resumed")
+        self.assertTrue(all(e.payload["round"] == 2 for e in second_events))
+        self.assertEqual(second_events[-1].step, 3)
+        latest = await registry.execute(ToolCall(id="latest", name="read_subagent_report", arguments={"run_id": child_id}))
+        self.assertEqual((latest.output["round"], latest.output["text"]), (2, "Continued with prior evidence."))
+        self.assertNotIn("resume_subagent", [t.name for t in model.requests[2].tools])
+
+    async def test_resume_rejects_running_cancelled_failed_unknown_foreign_and_closed_jobs(self):
+        manager, registry = self.setup_manager(BlockingModel())
+        manager.begin_run()
+        spawned = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Block"}]}))
+        job = manager.jobs[spawned.output["tasks"][0]["run_id"]]
+        for child_id in (job.run_id, "unknown"):
+            rejected = await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": child_id}))
+            self.assertEqual(rejected.error.code, "execution_error")
+        await manager.cancel([job])
+        rejected = await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id}))
+        self.assertEqual(rejected.error.code, "execution_error")
+        from nemo.core.runtime.subagents import ResumeArguments
+        from nemo.core.contracts.errors import ToolFailure
+        with self.assertRaises(ToolFailure):
+            manager.resume(ResumeArguments(run_id=job.run_id), registry.context.model_copy(update={"run_id": "foreign"}), None)
+        await manager.end_run()
+        with self.assertRaises(ToolFailure):
+            manager.resume(ResumeArguments(run_id=job.run_id), registry.context, None)
+        failed_manager, failed_registry = self.setup_manager(FakeModel([]))
+        failed_manager.begin_run()
+        created = await failed_registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Fail"}]}))
+        failed_id = created.output["tasks"][0]["run_id"]
+        await failed_manager.jobs[failed_id].worker
+        refused = await failed_registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": failed_id}))
+        self.assertEqual(refused.error.code, "execution_error")
+
+    async def test_resume_admission_has_no_side_effects_and_never_resets_budget(self):
+        manager, registry = self.setup_manager(FakeModel([ModelResponse(content="Original")]), calls=1)
+        manager.begin_run()
+        created = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Inspect"}]}))
+        job = manager.jobs[created.output["tasks"][0]["run_id"]]
+        await job.worker
+        for steps in (0, 41, True, "3"):
+            rejected = await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id, "max_steps": steps}))
+            self.assertEqual(rejected.error.code, "invalid_arguments")
+        exhausted = await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id}))
+        self.assertEqual(exhausted.error.code, "execution_error")
+        self.assertEqual((job.round, job.output, manager.budget.used), (1, "Original", 1))
+        manager.budget.limit = 4
+        from nemo.core.runtime.subagents import ResumeArguments
+        from nemo.core.contracts.errors import ToolFailure
+        with self.assertRaises(ToolFailure):
+            manager.resume(ResumeArguments(run_id=job.run_id), registry.context.model_copy(update={"max_output_chars": 20}), None)
+        self.assertEqual((job.round, job.seq, job.output), (1, job.seq, "Original"))
+        self.assertEqual(manager.budget.used, 1)
+
+    async def test_resumed_compaction_is_budgeted_and_checkpoint_is_reused(self):
+        from nemo.core.context.compaction import ContextWindow
+        from nemo.core.runtime.subagents import SubagentManager
+        model = FakeModel([ModelResponse(content="E" * 1000), ModelResponse(content="Earlier evidence summary"),
+                           ModelResponse(content="Second report"), ModelResponse(content="Third report")])
+        manager = SubagentManager(model, (AddTool(),), context=ContextBuilder(system_prompt="Child"),
+                                  context_window=ContextWindow(4000, 512), policy=ReadOnlyPolicy())
+        self.addAsyncCleanup(manager.end_run)
+        registry = ToolRegistry(manager.tools(), context=ExecutionContext(workspace=Path.cwd()))
+        manager.begin_run()
+        events = []
+        created = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "A" * 1000}]}))
+        job = manager.jobs[created.output["tasks"][0]["run_id"]]
+        await job.worker
+        resumed = await registry.execute(ToolCall(id="resume", name="resume_subagent",
+            arguments={"run_id": job.run_id, "prompt": "B" * 1600}), on_event=events.append)
+        self.assertIsNone(resumed.error)
+        await job.worker
+        self.assertEqual(job.status, "completed")
+        self.assertEqual(manager.budget.used, 3)
+        self.assertEqual(model.requests[1].tools, ())
+        self.assertTrue(any(e.type == "context.compacted" for e in events))
+        checkpoint = job.runtime.context_engine.checkpoint
+        self.assertIsNotNone(checkpoint)
+        await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id, "prompt": "One follow-up"}))
+        await job.worker
+        self.assertEqual((job.round, job.steps, manager.budget.used), (3, 3, 4))
+        self.assertIs(job.runtime.context_engine.checkpoint, checkpoint)
+        self.assertIn("Earlier evidence summary", model.requests[-1].messages[1].content)
+
+    async def test_resumed_worker_obeys_concurrency_and_cancel_waits_for_cleanup(self):
+        from nemo.testing.fakes import CallbackModel, CleanupBlockingModel
+        gate = CleanupBlockingModel()
+        self.addCleanup(gate.cleanup_release.set)
+        async def respond(request):
+            latest = [m.content for m in request.messages if m.role == "user"][-1]
+            if latest == "First":
+                return ModelResponse(content="Initial report")
+            return await gate.generate(request)
+        manager, registry = self.setup_manager(CallbackModel(respond), concurrent=1)
+        manager.begin_run()
+        created = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "First"}]}))
+        job = manager.jobs[created.output["tasks"][0]["run_id"]]
+        await job.worker
+        await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id, "prompt": "Continue"}))
+        await asyncio.wait_for(gate.started.wait(), 1)
+        other = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "Other"}]}))
+        other_job = manager.jobs[other.output["tasks"][0]["run_id"]]
+        await asyncio.sleep(0)
+        self.assertEqual(other_job.status, "queued")
+        cleanup = asyncio.create_task(manager.end_run())
+        await asyncio.wait_for(gate.cleanup_started.wait(), 1)
+        self.assertFalse(cleanup.done())
+        gate.cleanup_release.set()
+        await asyncio.wait_for(cleanup, 1)
+        self.assertEqual((job.status, other_job.status), ("cancelled", "cancelled"))
+        self.assertTrue(all(j.worker.done() for j in manager.jobs.values()))
+        self.assertEqual(job.reports[1].output, "Initial report")
+        self.assertEqual(job.reports[2].status, "cancelled")
+
+    async def test_resumed_round_timeout_preserves_previous_report(self):
+        from nemo.testing.fakes import CallbackModel
+        gate = BlockingModel()
+        async def respond(request):
+            latest = [m.content for m in request.messages if m.role == "user"][-1]
+            return ModelResponse(content="First report") if latest == "First" else await gate.generate(request)
+        context = ExecutionContext(workspace=Path.cwd(), default_timeout_seconds=.02, max_timeout_seconds=.02)
+        manager, registry = self.setup_manager(CallbackModel(respond), context=context)
+        manager.begin_run()
+        created = await registry.execute(ToolCall(id="spawn", name="spawn_subagents", arguments={"tasks": [{"task": "First"}]}))
+        job = manager.jobs[created.output["tasks"][0]["run_id"]]
+        await job.worker
+        await registry.execute(ToolCall(id="resume", name="resume_subagent", arguments={"run_id": job.run_id}))
+        await job.worker
+        self.assertEqual(job.status, "failed")
+        self.assertEqual(job.error, "Subagent exceeded its time limit")
+        self.assertTrue(gate.stopped.is_set())
+        self.assertEqual(job.reports[1].output, "First report")
+        self.assertEqual(manager.budget.used, 2)
+
     def setup_manager(self, model, *, concurrent=3, tasks=8, calls=40, context=None):
         from nemo.core.runtime.subagents import SubagentManager
         manager = SubagentManager(model, (AddTool(),), context=ContextBuilder(system_prompt="Child instructions"),

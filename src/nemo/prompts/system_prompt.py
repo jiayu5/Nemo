@@ -146,10 +146,11 @@ CLAUSES: tuple[PromptClause, ...] = (
     ),
     PromptClause(
         "subagent_delegation",
-        "Use spawn_subagents for parallel read-only tasks with explicit background. Continue "
-        "your work, then get_subagents or wait_subagents. Check evidence and statuses; "
-        "limit_reached reports are partial. Collect results before your final answer; "
-        "remaining children are cancelled at run end. Use cancel_subagent for unwanted work.",
+        "Use spawn_subagents for independent read-only tasks with explicit context. Work, "
+        "then query/wait and check evidence. Read reports via read_subagent_report to "
+        "next_offset=null. limit_reached is partial; resume_subagent continues with saved "
+        "context and shared budget. Collect results before answering; unfinished children "
+        "are cancelled at run end.",
     ),
     PromptClause(
         "memory_capture",

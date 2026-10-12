@@ -63,8 +63,25 @@ class ProfileConfig(Contract):
     parameters: dict[str, Any] = Field(default_factory=dict)
 
 
+class SubagentConfig(Contract):
+    """User defaults and hard caps for one parent run."""
+
+    default_max_steps: int = Field(default=15, ge=1, strict=True)
+    max_steps: int = Field(default=40, ge=1, strict=True)
+    max_model_calls: int = Field(default=160, ge=1, strict=True)
+
+    @model_validator(mode="after")
+    def validate_limits(self):
+        if self.default_max_steps > self.max_steps:
+            raise ValueError("default_max_steps must not exceed max_steps")
+        if self.max_model_calls <= self.max_steps:
+            raise ValueError("max_model_calls must exceed max_steps to leave room for the parent")
+        return self
+
+
 class AppConfig(Contract):
     memory_enabled: bool = True
+    subagents: SubagentConfig = Field(default_factory=SubagentConfig)
     providers: dict[str, ProviderConfig]
     models: dict[str, ModelConfig]
     aliases: dict[str, NonEmptyStr] = Field(default_factory=dict)
