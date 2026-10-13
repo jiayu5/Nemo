@@ -203,3 +203,157 @@ class CallbackModel:
     async def generate(self, request: ModelRequest) -> ModelResponse:
         self.requests.append(request.model_copy(deep=True))
         return await self.responder(request)
+
+
+class FakeMcpSession:
+    """Offline SDK session, shared by adapter and Server lifecycle tests."""
+    def __init__(self, tools=None, *, blocked=False, failure=False, discovery_blocked=False):
+        from mcp.types import Tool
+        self.tools = tools if tools is not None else [Tool(name="add", description="Add integers", inputSchema={
+            "type": "object", "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
+            "required": ["a", "b"], "additionalProperties": False})]
+        self.blocked, self.failure = blocked, failure
+        self.discovery_blocked = discovery_blocked
+        self.discovery_started = asyncio.Event()
+        self.calls = []
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self.stopped = asyncio.Event()
+        self.closed = False
+        self.result = None
+
+    async def list_tools(self, cursor=None):
+        from mcp.types import ListToolsResult
+        self.discovery_started.set()
+        if self.discovery_blocked:
+            await self.release.wait()
+        return ListToolsResult(tools=self.tools)
+
+    async def call_tool(self, name, arguments):
+        from mcp.types import CallToolResult, TextContent
+        self.calls.append((name, arguments))
+        self.started.set()
+        try:
+            if self.blocked:
+                await self.release.wait()
+            if self.failure:
+                raise RuntimeError("private remote error")
+            if self.result is not None:
+                return self.result
+            value = arguments.get("a", 0) + arguments.get("b", 0)
+            return CallToolResult(content=[TextContent(type="text", text=str(value))], structuredContent={"value": value})
+        finally:
+            self.stopped.set()
+
+    def context(self):
+        from contextlib import asynccontextmanager
+        @asynccontextmanager
+        async def scope():
+            try:
+                yield self
+            finally:
+                self.closed = True
+        return scope()
+
+
+def empty_mcp_tools(workspace):
+    from contextlib import asynccontextmanager
+    @asynccontextmanager
+    async def scope():
+        yield ()
+    return scope()
+
+
+class FakeOAuthServer:
+    """No-network OAuth issuer exercising the real SDK discovery and PKCE flow."""
+    def __init__(self):
+        self.requests = []
+        self.registrations = 0
+        self.refreshes = 0
+        self.refresh_failure = False
+        self.registration_failure = False
+        self.access_token = "oauth-access-private-123456789"
+        self.refresh_token = "oauth-refresh-private-123456789"
+        self.token_forms = []
+        self.token_accept_headers = []
+        self.token_error = None
+
+    def transport(self):
+        import httpx
+        from urllib.parse import parse_qs
+        def handle(request):
+            self.requests.append((request.method, str(request.url)))
+            path = request.url.path
+            if path == "/mcp":
+                if request.headers.get("Authorization") == "Bearer " + self.access_token:
+                    return httpx.Response(200, json={"ok": True})
+                return httpx.Response(401, headers={"WWW-Authenticate": 'Bearer resource_metadata="https://oauth.test/.well-known/oauth-protected-resource", scope="read"'})
+            if path == "/.well-known/oauth-protected-resource":
+                return httpx.Response(200, json={"resource": "https://oauth.test/mcp", "authorization_servers": ["https://oauth.test"], "scopes_supported": ["read"]})
+            if path == "/.well-known/oauth-authorization-server":
+                return httpx.Response(200, json={"issuer": "https://oauth.test", "authorization_endpoint": "https://oauth.test/authorize", "token_endpoint": "https://oauth.test/token", "registration_endpoint": "https://oauth.test/register", "response_types_supported": ["code"], "code_challenge_methods_supported": ["S256"], "token_endpoint_auth_methods_supported": ["none"], "scopes_supported": ["read"]})
+            if path == "/register":
+                import json
+                self.registrations += 1
+                if self.registration_failure:
+                    return httpx.Response(400, json={"error": "private registration diagnostic"})
+                return httpx.Response(201, json={**json.loads(request.content), "client_id": "nemo-client"})
+            if path == "/token":
+                self.token_accept_headers.append(request.headers.get("Accept"))
+                if self.token_error:
+                    return httpx.Response(200, json={"error": self.token_error, "error_description": "private diagnostic with credentials"})
+                if request.headers.get("Accept") != "application/json":
+                    return httpx.Response(200, text="access_token=private-token&token_type=bearer")
+                form = parse_qs(request.content.decode())
+                self.token_forms.append(form)
+                if form["grant_type"] == ["refresh_token"]:
+                    self.refreshes += 1
+                    if self.refresh_failure:
+                        return httpx.Response(400, json={"error": "private token diagnostic"})
+                return httpx.Response(200, json={"access_token": self.access_token, "refresh_token": self.refresh_token, "token_type": "Bearer", "expires_in": 3600, "scope": "read"})
+            return httpx.Response(404)
+        return httpx.MockTransport(handle)
+
+
+class FakeBrowserCallback:
+    instances = []
+    def __init__(self, port=0):
+        self.port = port or 43210
+        self.state = None
+        self.issuer = None
+        self.closed = False
+        self.future = None
+        self.loop = None
+        self.instances.append(self)
+
+    async def start(self):
+        self.future = asyncio.get_running_loop().create_future()
+        self.loop = asyncio.get_running_loop()
+        return f"http://127.0.0.1:{self.port}/oauth/callback"
+
+    async def close(self):
+        self.closed = True
+        if self.future is None:
+            return
+        if not self.future.done():
+            self.future.cancel()
+        elif not self.future.cancelled():
+            self.future.exception()
+
+
+class FakeCallbackWriter:
+    def __init__(self):
+        self.data = b""
+        self.closed = False
+
+    def write(self, data):
+        self.data += data
+
+    async def drain(self):
+        pass
+
+    def close(self):
+        self.closed = True
+
+    async def wait_closed(self):
+        pass

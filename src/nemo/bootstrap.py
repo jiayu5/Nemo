@@ -5,8 +5,12 @@ configuration decides *what* to use, this module decides *which class* provides 
 """
 
 from collections.abc import Mapping
+from contextlib import asynccontextmanager
 from pathlib import Path
+import webbrowser
 
+from nemo.adapters.mcp import connect_tools, McpConnection
+from nemo.adapters.mcp_oauth import McpOAuthManager
 from nemo.adapters.protocols.openai_compatible import OpenAICompatibleAdapter
 from nemo.adapters.persistence import SQLiteRepository
 from nemo.adapters.tools.filesystem import (
@@ -140,6 +144,28 @@ def build_model_client(
     )
 
 
+@asynccontextmanager
+async def build_mcp_tools(workspace: Path):
+    # No MCP configuration exists before the first model setup.
+    config = ConfigEditor().load_optional()
+    async with connect_tools(config.mcp_servers if config else {}, workspace, oauth_manager=MCP_OAUTH) as tools:
+        yield tools
+
+
+async def probe_mcp(server_id, config, workspace: Path):
+    connection = McpConnection(server_id, config, workspace, oauth_manager=MCP_OAUTH)
+    try:
+        await connection.start()
+        return [{"name": t.remote_name, "model_name": t.name, "description": t.description,
+                 "read_only": t.read_only, "subagent_allowed": t.subagent_allowed,
+                 "input_schema": t.input_schema} for t in connection.tools]
+    finally:
+        await connection.close()
+
+
+MCP_OAUTH = McpOAuthManager(connection_factory=McpConnection, browser_opener=webbrowser.open)
+
+
 def build_server_application(database_path: Path | str) -> NemoApplication:
     """Compose the production Server application from concrete adapters."""
 
@@ -154,6 +180,9 @@ def build_server_application(database_path: Path | str) -> NemoApplication:
         skill_tools_factory=build_skill_tools,
         memory_store=memory_store,
         config_editor=config_editor,
+        mcp_tools_factory=build_mcp_tools,
+        mcp_probe=probe_mcp,
+        mcp_oauth=MCP_OAUTH,
         client_factory=build_model_client,
         tools_factory=lambda: build_local_tools(memory_store=memory_store, history_repository=repository),
     )

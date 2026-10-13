@@ -6,7 +6,7 @@ import asyncio
 import signal
 from pathlib import Path
 
-from nemo.bootstrap import build_local_tools, build_memory_store, build_skill_catalog, build_skill_tools
+from nemo.bootstrap import build_local_tools, build_memory_store, build_skill_catalog, build_skill_tools, build_mcp_tools
 from nemo.core.skills import skill_directory
 from nemo.core.memory import MemoryStore, memory_messages
 from nemo.core.contracts.events import EventType
@@ -51,20 +51,35 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     if session is None:
         return 2
 
+    # Hold transport contexts outside AgentRuntime; child cleanup completes first.
+    from contextlib import AsyncExitStack
     client = client_factory(run_override=args.model)
+    try:
+        async with AsyncExitStack() as stack:
+            mcp_tools = await stack.enter_async_context(build_mcp_tools(workspace))
+            return await _serve_connected(args, output, directory, client, workspace,
+                                          session, path, resumed, checkpoint, mcp_tools)
+    finally:
+        closer = getattr(client, "aclose", None)
+        if closer is not None:
+            await closer()
+
+
+async def _serve_connected(args, output, directory, client, workspace,
+                           session, path, resumed, checkpoint, mcp_tools):
     resolved = client.resolved
     mode = ApprovalMode(args.mode)
     policy = ApprovalPolicy(mode, approver=TerminalApprover(output))
     memory_store = build_memory_store()
     skills = build_skill_catalog(workspace)
-    tools = (*build_local_tools(memory_store=memory_store), *build_skill_tools(skills))
+    tools = (*build_local_tools(memory_store=memory_store), *build_skill_tools(skills), *mcp_tools)
     user_instructions = load_user_instructions()
     project_instructions = load_project_instructions(workspace)
     window = (
         ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
         if resolved.context_window_tokens is not None else None
     )
-    child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
+    child_tools = tuple(tool for tool in tools if tool.read_only and getattr(tool, "subagent_allowed", True) and tool.name != "run_shell")
     subagents = SubagentManager(
         client, child_tools, policy=policy, context_window=window,
         limits=load_config().subagents,

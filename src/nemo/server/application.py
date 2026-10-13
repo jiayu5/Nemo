@@ -36,8 +36,13 @@ class NemoApplication:
         config_loader: Callable[[], Any] = load_config,
         secret_loader_factory: Callable[[], Any] = SecretLoader,
         config_editor: ConfigEditor | None = None,
+        mcp_tools_factory=None,
+        mcp_probe=None,
+        mcp_oauth=None,
     ) -> None:
         self.repository = repository
+        from nemo.server.mcp import McpService
+        self.mcp = McpService(config_editor or ConfigEditor(), probe=mcp_probe, oauth=mcp_oauth)
         self.memory_store = memory_store
         self.memories = MemoryService(repository, memory_store)
         self.skills = SkillsService(repository, skill_management_store)
@@ -57,6 +62,7 @@ class NemoApplication:
             memory_store=memory_store,
             approval_timeout_seconds=approval_timeout_seconds,
             config_loader=config_loader,
+            mcp_tools_factory=mcp_tools_factory,
         )
         self.traces = TraceService(repository)
         self.settings = SettingsService(config_editor or ConfigEditor())
@@ -65,6 +71,7 @@ class NemoApplication:
         return await self.runs.startup()
 
     async def shutdown(self) -> None:
+        await self.mcp.shutdown()
         await self.runs.shutdown()
 
     def create_session(

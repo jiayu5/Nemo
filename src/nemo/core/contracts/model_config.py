@@ -9,6 +9,7 @@ from typing import Annotated, Any, Literal
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from nemo.core.contracts.types import Contract
+from nemo.core.contracts.mcp import McpServerConfig
 
 ProtocolName = Literal["openai_responses", "openai_compatible", "anthropic_messages"]
 Capability = Literal["tool_calling", "streaming"]
@@ -80,6 +81,7 @@ class SubagentConfig(Contract):
 
 
 class AppConfig(Contract):
+    mcp_servers: dict[str, McpServerConfig] = Field(default_factory=dict)
     memory_enabled: bool = True
     subagents: SubagentConfig = Field(default_factory=SubagentConfig)
     providers: dict[str, ProviderConfig]

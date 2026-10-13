@@ -51,6 +51,26 @@ class ConfigEditor:
             updated = config.model_copy(update={"memory_enabled": enabled})
             _atomic_write(self.config_path, render_toml(updated), mode=0o600)
 
+    def save_mcp(self, server_id: str, server) -> None:
+        with self._lock:
+            current = self.load_optional()
+            if current is None:
+                raise ConfigError("configure a model before adding MCP connections")
+            raw = current.model_dump(mode="python")
+            raw["mcp_servers"][server_id] = server.model_dump(mode="python")
+            config = validate_config(raw, source="MCP settings")
+            _atomic_write(self.config_path, render_toml(config), mode=0o600)
+
+    def delete_mcp(self, server_id: str) -> None:
+        with self._lock:
+            current = self.load_optional()
+            if current is None or server_id not in current.mcp_servers:
+                raise ConfigError("MCP connection not found")
+            raw = current.model_dump(mode="python")
+            del raw["mcp_servers"][server_id]
+            config = validate_config(raw, source="MCP settings")
+            _atomic_write(self.config_path, render_toml(config), mode=0o600)
+
     def secret_source(self, name: str | None) -> str | None:
         if not name:
             return None
@@ -220,6 +240,12 @@ def render_toml(config: AppConfig) -> str:
     for key, value in config.subagents.model_dump().items():
         lines.append(f"{key} = {_toml_value(value)}")
     lines.append("")
+    for name, server in config.mcp_servers.items():
+        lines.append(f"[mcp_servers.{_toml_key(name)}]")
+        for key, value in server.model_dump(mode="python").items():
+            if value is not None:
+                lines.append(f"{key} = {_toml_value(value)}")
+        lines.append("")
     for name, provider in config.providers.items():
         lines.extend(
             [

@@ -25,7 +25,7 @@ from nemo.server.errors import (
 )
 from nemo.server.repository import TERMINAL_STATUSES
 from nemo.server.schemas import (
-    ActionResponse, SkillImportRequest,
+    ActionResponse, SkillImportRequest, McpTestRequest,
     MemorySaveRequest, MemoryForgetRequest, MemorySettingsRequest,
     ApprovalAnswerRequest,
     CreateRunRequest,
@@ -45,6 +45,7 @@ from nemo.server.schemas import (
     UpdateSessionRequest,
 )
 from nemo.server.application import NemoApplication
+from nemo.core.contracts.mcp import McpServerConfig
 from nemo.server.desktop_access import install_desktop_access
 
 
@@ -264,6 +265,67 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from None
         except NemoError as exc:
             raise HTTPException(status_code=502, detail=exc.public_message) from None
+
+    @app.get("/mcp")
+    async def list_mcp():
+        try:
+            return agent_service.mcp.list()
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.put("/mcp/{server_id}")
+    async def save_mcp(server_id: str, body: McpServerConfig):
+        try:
+            if agent_service.mcp.oauth:
+                await agent_service.mcp.oauth.cancel(server_id)
+            return agent_service.mcp.save(server_id, body)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.delete("/mcp/{server_id}")
+    async def delete_mcp(server_id: str):
+        try:
+            if agent_service.mcp.oauth:
+                config = agent_service.mcp._oauth_config(server_id)
+                await agent_service.mcp.oauth.disconnect(server_id, config)
+            return agent_service.mcp.delete(server_id)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.post("/mcp/{server_id}/test")
+    async def test_mcp(server_id: str, body: McpTestRequest):
+        try:
+            return await agent_service.mcp.test(server_id, body.workspace)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.post("/mcp/{server_id}/oauth/start")
+    async def start_mcp_oauth(server_id: str, body: McpTestRequest):
+        try:
+            return await agent_service.mcp.authorize(server_id, body.workspace)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.get("/mcp/{server_id}/oauth")
+    async def mcp_oauth_status(server_id: str):
+        try:
+            return agent_service.mcp.authorization(server_id)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.post("/mcp/{server_id}/oauth/cancel")
+    async def cancel_mcp_oauth(server_id: str):
+        try:
+            return await agent_service.mcp.cancel_authorization(server_id)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
+
+    @app.post("/mcp/{server_id}/oauth/disconnect")
+    async def disconnect_mcp_oauth(server_id: str):
+        try:
+            return await agent_service.mcp.disconnect(server_id)
+        except ConfigError as exc:
+            raise HTTPException(400, detail=exc.public_message) from None
 
     @app.get("/settings/providers", response_model=ProviderSettingsResponse)
     async def provider_settings() -> dict:

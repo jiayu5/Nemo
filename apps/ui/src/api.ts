@@ -1,7 +1,7 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
 import type {
-  ApprovalMode, InstalledSkills, SkillDetail,
+  ApprovalMode, InstalledSkills, SkillDetail, McpConfig, McpServer, McpToolInfo, McpAuthorization,
   MemoryState, MemoryDraft, MemoryEntry,
   Message,
   ModelOption,
@@ -100,6 +100,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  mcpServers: () => request<{ servers: McpServer[] }>("/mcp"),
+  authorizeMcp: (id: string, workspace: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth/start`, { method: "POST", body: JSON.stringify({ workspace }) }),
+  mcpAuthorization: (id: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth`),
+  cancelMcpAuthorization: (id: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth/cancel`, { method: "POST" }),
+  disconnectMcp: (id: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth/disconnect`, { method: "POST" }),
+  saveMcp: (id: string, config: McpConfig) => request<{ status: string }>(`/mcp/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(config) }),
+  deleteMcp: (id: string) => request<{ status: string }>(`/mcp/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  testMcp: (id: string, workspace: string) => request<{ status: string; tools: McpToolInfo[]; error?: string }>(`/mcp/${encodeURIComponent(id)}/test`, { method: "POST", body: JSON.stringify({ workspace }) }),
   skills: (sessionId: string | null) => request<InstalledSkills>(
     `/skills${sessionId ? `?session_id=${encodeURIComponent(sessionId)}` : ""}`),
   skillDetail: (skillId: string, sessionId: string | null) => request<SkillDetail>(

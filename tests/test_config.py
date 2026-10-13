@@ -52,6 +52,37 @@ class ConfigTestCase(unittest.TestCase):
 
 
 class LoaderTests(ConfigTestCase):
+    def test_mcp_settings_survive_other_configuration_edits(self):
+        from nemo.core.contracts.mcp import McpServerConfig
+        config_path = self.write(VALID_CONFIG)
+        editor = ConfigEditor(config_path=config_path, secret_path=self.dir / "missing.env", environ={})
+        server = McpServerConfig(command="python", args=["server.py"], env={"API_KEY": "SERVICE_KEY"},
+                                 read_only_tools=["read"], subagent_tools=["read"])
+        editor.save_mcp("local", server)
+        editor.set_memory_enabled(False)
+        self.assertEqual(load_config(config_path).mcp_servers["local"], server)
+        self.assertFalse((self.dir / "missing.env").exists())
+        editor.delete_mcp("local")
+        self.assertEqual(load_config(config_path).mcp_servers, {})
+
+    def test_mcp_transport_permission_and_secret_reference_validation(self):
+        from nemo.core.contracts.mcp import McpServerConfig
+        from pydantic import ValidationError
+        for fields in ({}, {"transport": "streamable_http", "url": "https://user:pass@example.com/mcp"},
+                       {"transport": "streamable_http", "url": "https://example.com/mcp?token=secret"},
+                       {"command": "python", "headers": {"Authorization": "MY_AUTH"}},
+                       {"command": "python", "env": {"API_KEY": "literal-secret-value"}},
+                       {"command": "python", "env": {"BAD=KEY": "SERVICE_KEY"}},
+                       {"command": "python", "subagent_tools": ["write"]}):
+            with self.subTest(fields=fields), self.assertRaises(ValidationError):
+                McpServerConfig(**fields)
+        config = load_config(self.write(VALID_CONFIG))
+        from nemo.config.loader import validate_config
+        raw = config.model_dump(mode="python")
+        raw["mcp_servers"] = {"bad.id": {"command": "python"}}
+        with self.assertRaises(ConfigError):
+            validate_config(raw)
+
     def test_subagent_defaults_and_configuration_survive_editor_round_trip(self):
         original = load_config(self.write(VALID_CONFIG))
         self.assertEqual(original.subagents.default_max_steps, 15)

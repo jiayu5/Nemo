@@ -68,3 +68,5 @@ M5c 已按上述边界实现。高级 Alias、Profile、headers 和 parameters �
 ## 7. 非目标
 
 当前不做语法高亮、多窗口和远程部署认证。桌面打包与本地 API 防护已由 M6 完成，见 [macOS App](macos-app.md)。
+
+MCP 连接使用独立管理弹窗，保持右侧 Activities 固定。管理动作、账号登录与断开、凭据引用、工具权限及上次测试状态见 [MCP 参考](../reference/mcp.md#管理入口与生效)。

@@ -51,6 +51,165 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.services.append(service)
         return service, model
 
+    async def test_mcp_settings_api_discovery_and_validation_do_not_write_secrets(self):
+        from nemo.core.contracts.mcp import McpServerConfig
+        editor = ConfigEditor(config_path=self.root / "mcp.toml", secret_path=self.root / "mcp.env", environ={})
+        editor.save(self.config(), {})
+        probe_calls = []
+        async def probe(server_id, config, workspace):
+            probe_calls.append((server_id, config, workspace))
+            return [{"name": "read", "model_name": "mcp_local_read", "description": "Read", "input_schema": {"type": "object"}, "read_only": True, "subagent_allowed": True}]
+        service = NemoApplication(SQLiteRepository(self.root / "mcp-api.sqlite"), client_factory=lambda **_: FakeModel([]),
+                                  config_editor=editor, mcp_probe=probe)
+        self.services.append(service)
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service=service)), base_url="http://test") as client:
+            self.assertEqual((await client.get("/mcp")).json()["servers"], [])
+            saved = await client.put("/mcp/local", json={"command": "python", "args": ["server.py"], "read_only_tools": ["read"], "subagent_tools": ["read"]})
+            self.assertEqual(saved.status_code, 200)
+            self.assertEqual(probe_calls, [])  # Saving/listing never executes a process.
+            discovered = await client.post("/mcp/local/test", json={"workspace": str(self.root)})
+            self.assertEqual(discovered.json()["status"], "ok")
+            listed = (await client.get("/mcp")).json()["servers"][0]
+            self.assertEqual(listed["tools"][0]["model_name"], "mcp_local_read")
+            self.assertFalse(listed["enabled"])
+            bad = await client.put("/mcp/invalid", json={"command": "python", "subagent_tools": ["write"]})
+            self.assertEqual(bad.status_code, 422)
+            self.assertFalse(editor.secret_path.exists())
+            deleted = await client.delete("/mcp/local")
+            self.assertEqual(deleted.status_code, 200)
+            self.assertEqual((await client.get("/mcp")).json()["servers"], [])
+
+    async def test_mcp_tools_are_assembled_per_run_called_and_traced(self):
+        from contextlib import asynccontextmanager
+        from nemo.adapters.mcp import McpConnection
+        from nemo.core.contracts.mcp import McpServerConfig
+        from nemo.testing.fakes import FakeMcpSession
+        sdk = FakeMcpSession()
+        connections = []
+        @asynccontextmanager
+        async def factory(workspace):
+            connection = McpConnection("demo", McpServerConfig(command="unused", read_only_tools=["add"]), workspace)
+            connection._session = sdk.context
+            connections.append(connection)
+            try:
+                await connection.start()
+                yield connection.tools
+            finally:
+                await connection.close()
+        model = FakeModel([ModelResponse(tool_calls=(ToolCall(id="external", name="mcp_demo_add", arguments={"a":20,"b":22}),)), ModelResponse(content="42")])
+        service = NemoApplication(SQLiteRepository(self.root / "mcp-run.sqlite"), client_factory=lambda **_: model, mcp_tools_factory=factory)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        run = service.start_run(session["session_id"], prompt="Add", max_steps=3)
+        result = await self.wait_terminal(service, run["run_id"])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(sdk.calls, [("add", {"a":20,"b":22})])
+        if run["run_id"] in service.runs._tasks:
+            await service.runs._tasks[run["run_id"]]
+        self.assertTrue(sdk.closed)
+        self.assertTrue(any(e.type == "tool.completed" and e.payload["name"] == "mcp_demo_add" for e in service.events_after(run["run_id"],0)))
+
+    async def test_cancel_during_mcp_discovery_cleans_up_before_terminal_without_model_calls(self):
+        from contextlib import asynccontextmanager
+        from nemo.adapters.mcp import McpConnection
+        from nemo.core.contracts.mcp import McpServerConfig
+        from nemo.testing.fakes import FakeMcpSession
+        sdk = FakeMcpSession(discovery_blocked=True)
+        connection = McpConnection("blocked", McpServerConfig(command="unused"), self.root)
+        connection._session = sdk.context
+        @asynccontextmanager
+        async def factory(workspace):
+            try:
+                await connection.start()
+                yield connection.tools
+            finally:
+                await connection.close()
+        model = FakeModel([])
+        service = NemoApplication(SQLiteRepository(self.root / "mcp-cancel.sqlite"), client_factory=lambda **_:model, mcp_tools_factory=factory)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.ASK)
+        run = service.start_run(session["session_id"], prompt="Start", max_steps=3)
+        await asyncio.wait_for(sdk.discovery_started.wait(),1)
+        service.cancel_run(run["run_id"])
+        result = await self.wait_terminal(service,run["run_id"])
+        self.assertEqual(result["status"], "cancelled")
+        self.assertTrue(sdk.closed)
+        self.assertTrue(connection._owner.done())
+        self.assertEqual(model.requests, [])
+        self.assertEqual(service.events_after(run["run_id"],0)[-1].type, "run.cancelled")
+
+    async def test_mcp_browser_authorization_api_starts_polls_cancels_and_disconnects(self):
+        class Authorization:
+            def __init__(self):
+                self.calls = []
+                self.state = {"status": "not_connected"}
+            def status(self, server_id, config):
+                return dict(self.state)
+            async def start(self, server_id, config, workspace):
+                self.calls.append(("start", server_id, workspace))
+                self.state = {"status": "authorizing", "authorization_url": "https://oauth.test/authorize?state=opaque"}
+                return dict(self.state)
+            async def cancel(self, server_id):
+                self.calls.append(("cancel", server_id))
+                self.state = {"status": "not_connected"}
+            async def disconnect(self, server_id, config):
+                self.calls.append(("disconnect", server_id))
+                self.state = {"status": "not_connected"}
+            async def shutdown(self):
+                self.calls.append(("shutdown",))
+        authorization = Authorization()
+        editor = ConfigEditor(config_path=self.root / "oauth.toml", secret_path=self.root / "oauth.env", environ={})
+        editor.save(self.config(), {})
+        async def probe(server_id, config, workspace):
+            return [{"name": "read", "model_name": "mcp_remote_read", "description": "Read",
+                     "input_schema": {"type": "object"}, "read_only": True, "subagent_allowed": True}]
+        service = NemoApplication(SQLiteRepository(self.root / "oauth-api.sqlite"),
+                                  client_factory=lambda **_: FakeModel([]),
+                                  config_editor=editor, mcp_probe=probe, mcp_oauth=authorization)
+        self.services.append(service)
+        oauth_server = {"transport": "streamable_http", "url": "https://oauth.test/mcp", "auth_mode": "oauth"}
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=create_app(service=service)), base_url="http://test") as client:
+            self.assertEqual((await client.put("/mcp/remote", json=oauth_server)).status_code, 200)
+            # Editing a connection cancels an authorization already in progress for it.
+            self.assertEqual([call[0] for call in authorization.calls], ["cancel"])
+            listed = (await client.get("/mcp")).json()["servers"][0]
+            self.assertEqual(listed["authorization"], {"status": "not_connected"})
+            started = await client.post("/mcp/remote/oauth/start", json={"workspace": str(self.root)})
+            self.assertEqual(started.status_code, 200)
+            self.assertEqual(("start", "remote", str(self.root)), authorization.calls[-1])
+            self.assertIn("authorize", started.json()["authorization_url"])
+            self.assertEqual((await client.get("/mcp/remote/oauth")).json()["status"], "authorizing")
+            self.assertEqual((await client.post("/mcp/remote/oauth/cancel")).json()["status"], "not_connected")
+            authorization.state = {"status": "connected"}
+            self.assertEqual((await client.post("/mcp/remote/test", json={"workspace": str(self.root)})).json()["status"], "ok")
+            self.assertEqual((await client.get("/mcp")).json()["servers"][0]["tools"][0]["model_name"], "mcp_remote_read")
+            # Disconnecting the account must not leave a stale discovery result behind.
+            self.assertEqual((await client.post("/mcp/remote/oauth/disconnect")).json()["status"], "not_connected")
+            self.assertEqual((await client.get("/mcp")).json()["servers"][0]["tools"], [])
+            self.assertEqual((await client.get("/mcp")).json()["servers"][0]["status"], "not_tested")
+            self.assertEqual([call[0] for call in authorization.calls],
+                             ["cancel", "start", "cancel", "disconnect"])
+            self.assertEqual((await client.get("/mcp/missing/oauth")).status_code, 400)
+            self.assertEqual([call[0] for call in authorization.calls],
+                             ["cancel", "start", "cancel", "disconnect"])
+
+    async def test_mcp_test_reports_safe_reason_for_an_unauthorized_account(self):
+        from nemo.core.contracts.errors import ToolFailure
+        from nemo.core.contracts.mcp import McpServerConfig
+        editor = ConfigEditor(config_path=self.root / "reason.toml", secret_path=self.root / "reason.env", environ={})
+        editor.save(self.config(), {})
+        async def probe(server_id, config, workspace):
+            raise ToolFailure("MCP account needs authorization; connect it in MCP settings")
+        service = NemoApplication(SQLiteRepository(self.root / "reason.sqlite"),
+                                  client_factory=lambda **_: FakeModel([]),
+                                  config_editor=editor, mcp_probe=probe)
+        self.services.append(service)
+        editor.save_mcp("remote", McpServerConfig(transport="streamable_http", url="https://oauth.test/mcp", auth_mode="oauth"))
+        result = await service.mcp.test("remote", str(self.root))
+        self.assertEqual(result["status"], "failed")
+        self.assertEqual(result["error"], "MCP account needs authorization; connect it in MCP settings")
+        self.assertEqual(result["tools"], [])
+
     async def test_subagent_budget_configuration_is_loaded_for_each_run(self):
         from nemo.core.contracts.model_config import SubagentConfig
         config = self.config().model_copy(update={"subagents": SubagentConfig(

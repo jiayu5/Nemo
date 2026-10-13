@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { McpPanel } from "./components/McpPanel";
 import { SubagentView } from "./components/SubagentView";
 import { SkillsPanel } from "./components/SkillsPanel";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -10,6 +11,7 @@ import { useNemoWorkspace } from "./hooks/useNemoWorkspace";
 
 export default function App() {
   const workspace = useNemoWorkspace();
+  const [showMcp, setShowMcp] = useState(false);
   const [showMemory, setShowMemory] = useState(false);
   const [showSkills, setShowSkills] = useState(false);
   const [showConnections, setShowConnections] = useState(false);
@@ -37,6 +39,7 @@ export default function App() {
         >Connections</button>
         <button className="settings-toggle" type="button" onClick={() => setShowMemory(true)}>Memories</button>
         <button className="settings-toggle" type="button" onClick={() => setShowSkills(true)}>Skills</button>
+        <button className="settings-toggle" type="button" onClick={() => setShowMcp(true)}>MCP</button>
         <span className={`server-pill ${workspace.serverOnline ? "online" : "offline"}`}>
           <i /> {workspace.serverOnline ? "Server online" : "Server offline"}
         </span>
@@ -81,6 +84,8 @@ export default function App() {
       </main>
 
       {subagent && <SubagentView runId={subagent} events={workspace.events} onClose={() => setSubagent(null)} />}
+
+      {showMcp && <McpPanel workspace={workspace.selected?.workspace ?? workspace.workspace} onClose={() => setShowMcp(false)} />}
 
       {showConnections && <ConnectionsDialog settings={workspace.providerSettings}
         onSaved={workspace.refreshConfiguration} onClose={() => setShowConnections(false)} />}

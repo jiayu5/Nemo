@@ -101,3 +101,5 @@ PATH="$HOME/.cargo/bin:$PATH" npm --prefix apps/ui run desktop:build
 ```
 
 API 见 [Server API 参考](docs/reference/server-api.md)，开发约束见 [AGENTS.md](AGENTS.md)。
+
+MCP 外部工具可在顶部 **MCP** 弹窗添加、测试和启用；需要账号的 HTTP 连接选择 Browser sign-in 登录，本地 stdio 与远程 Streamable HTTP 的配置和示例见 [MCP 参考](docs/reference/mcp.md)。

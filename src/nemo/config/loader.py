@@ -49,6 +49,9 @@ def _first_issue(exc: ValidationError) -> str:
 
 
 def _check_references(config: AppConfig) -> None:
+    for name in config.mcp_servers:
+        if not name or len(name) > 32 or any(c not in "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-" for c in name):
+            raise ConfigError("MCP server IDs must be 1–32 letters, numbers, underscores or dashes")
     for name, model in config.models.items():
         _require_provider(config, name, model)
         _reject_reserved_parameters(f"models.{name}.parameters", model.parameters)

@@ -67,3 +67,21 @@ class ToolFailure(NemoError):
     """
 
     code = "tool_failure"
+
+
+def first_public_message(exc: BaseException) -> str | None:
+    """Return the first safe message in an exception, including task-group wrappers.
+
+    Adapters often fail inside an AnyIO task group, which re-raises the original
+    expected failure as an ``ExceptionGroup``. Callers that must report a reason
+    use this instead of inspecting only the outer exception.
+    """
+
+    message = getattr(exc, "public_message", None)
+    if isinstance(message, str):
+        return message
+    for inner in getattr(exc, "exceptions", ()) or ():
+        found = first_public_message(inner)
+        if found:
+            return found
+    return None

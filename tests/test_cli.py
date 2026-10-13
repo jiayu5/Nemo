@@ -229,6 +229,10 @@ class CliTests(unittest.TestCase):
         config_patch = patch("nemo.cli.direct.load_config", return_value=SimpleNamespace(subagents=SubagentConfig()))
         config_patch.start()
         self.addCleanup(config_patch.stop)
+        from nemo.testing.fakes import empty_mcp_tools
+        mcp_patch = patch("nemo.cli.direct.build_mcp_tools", side_effect=empty_mcp_tools)
+        mcp_patch.start()
+        self.addCleanup(mcp_patch.stop)
         memory_patch.start()
         self.addCleanup(memory_patch.stop)
         from nemo.adapters.skills import FileSkillCatalog

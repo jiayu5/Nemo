@@ -210,3 +210,26 @@ export interface InstalledSkills {
   entries: InstalledSkill[];
   diagnostics: string[];
 }
+
+export interface McpConfig {
+  auth_mode?: "none" | "oauth";
+  oauth_client_id?: string | null;
+  oauth_client_secret_env?: string | null;
+  oauth_issuer?: string | null;
+  oauth_redirect_port?: number;
+  oauth_client_metadata_url?: string | null;
+  proxy_env?: string | null;
+  transport: "stdio" | "streamable_http";
+  enabled: boolean;
+  command: string | null;
+  args: string[];
+  url: string | null;
+  env: Record<string, string>;
+  headers: Record<string, string>;
+  timeout_seconds: number;
+  read_only_tools: string[];
+  subagent_tools: string[];
+}
+export interface McpToolInfo { name: string; model_name: string; description: string; read_only: boolean; subagent_allowed: boolean; input_schema: Record<string, unknown> }
+export interface McpAuthorization { status: string; authorization_url?: string; error?: string; tools?: McpToolInfo[] }
+export interface McpServer extends McpConfig { id: string; status: string; tools: McpToolInfo[]; error?: string; authorization?: McpAuthorization }

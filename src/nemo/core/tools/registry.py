@@ -58,6 +58,11 @@ class ToolRegistry:
         self.policy = policy or AllowAllPolicy()
         self.max_result_chars = max_result_chars
 
+    @staticmethod
+    def _parse(tool: Tool, arguments: dict) -> BaseModel:
+        parser = getattr(tool, "parse_arguments", None)
+        return parser(arguments) if parser else tool.arguments_type.model_validate(arguments, strict=True)
+
     def _runtime_scopes(self) -> tuple:
         scopes = {}
         for tool in self._tools.values():
@@ -76,7 +81,7 @@ class ToolRegistry:
 
     def schemas(self) -> tuple[ToolSpec, ...]:
         return tuple(ToolSpec(name=t.name, description=t.description,
-                              parameters=t.arguments_type.model_json_schema())
+                              parameters=getattr(t, "input_schema", None) or t.arguments_type.model_json_schema())
                      for t in self._tools.values())
 
     def is_read_only(self, name: str) -> bool:
@@ -95,7 +100,7 @@ class ToolRegistry:
         if tool is None:
             return None
         try:
-            arguments = tool.arguments_type.model_validate(call.arguments, strict=True)
+            arguments = self._parse(tool, call.arguments)
         except Exception:
             # A tool that cannot describe its own call must not break the trace.
             return None
@@ -107,8 +112,8 @@ class ToolRegistry:
         if tool is None:
             return self._error(call, "unknown_tool", "Tool is not registered")
         try:
-            arguments = tool.arguments_type.model_validate(call.arguments, strict=True)
-        except ValidationError:
+            arguments = self._parse(tool, call.arguments)
+        except (ValidationError, ValueError):
             # Do not echo arguments: they can contain secrets.
             return self._error(call, "invalid_arguments", "Arguments do not match tool schema")
         decision = await self.policy.decide(

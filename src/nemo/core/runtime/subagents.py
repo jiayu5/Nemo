@@ -187,7 +187,7 @@ class SubagentManager:
         )
         self.budget = ModelCallBudget(self.limits.max_model_calls if max_model_calls is None else max_model_calls)
         self.model = BudgetedModel(model, self.budget)
-        self.child_tools = tuple(t for t in tools if t.read_only
+        self.child_tools = tuple(t for t in tools if t.read_only and getattr(t, "subagent_allowed", True)
                                  and t.name not in CONTROL_TOOLS | {"run_shell"})
         self.context = context
         self.policy = policy

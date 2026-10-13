@@ -49,6 +49,7 @@ class RunManager:
         skill_tools_factory: Callable[[SkillCatalog], tuple[Any, ...]] | None = None,
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
+        mcp_tools_factory=None,
     ) -> None:
         self.repository = repository
         self.memory_store = memory_store
@@ -58,6 +59,7 @@ class RunManager:
         self._skill_tools_factory = skill_tools_factory
         self._approval_timeout = approval_timeout_seconds
         self._config_loader = config_loader
+        self._mcp_tools_factory = mcp_tools_factory
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._cancel: dict[str, asyncio.Event] = {}
         self._approval_waiters: dict[str, asyncio.Future[ApprovalOutcome]] = {}
@@ -175,6 +177,29 @@ class RunManager:
             self._record_approval_outcome(run_id, request_id, outcome)
             future.set_result(outcome)
 
+    async def _connect_mcp(self, stack, workspace: Path, cancel: asyncio.Event):
+        connecting = asyncio.create_task(stack.enter_async_context(self._mcp_tools_factory(workspace)))
+        stopping = asyncio.create_task(cancel.wait())
+        try:
+            done, _ = await asyncio.wait((connecting, stopping), return_when=asyncio.FIRST_COMPLETED)
+            if stopping in done:
+                raise asyncio.CancelledError
+            return await connecting
+        finally:
+            for task in (connecting, stopping):
+                if not task.done() and not task.cancelling():
+                    task.cancel()
+            drain = asyncio.gather(connecting, stopping, return_exceptions=True)
+            interrupted = False
+            while not drain.done():
+                try:
+                    await asyncio.shield(drain)
+                except asyncio.CancelledError:
+                    interrupted = True
+            drain.result()
+            if interrupted:
+                raise asyncio.CancelledError
+
     async def _execute(
         self,
         run_id: str,
@@ -184,6 +209,9 @@ class RunManager:
         cancel: asyncio.Event,
     ) -> None:
         client = None
+        history = ()
+        from contextlib import AsyncExitStack
+        mcp_stack = AsyncExitStack()
         try:
             self.repository.set_run_running(run_id)
             client = self._client_factory(run_override=session["model"])
@@ -214,7 +242,9 @@ class RunManager:
                 ContextWindow(resolved.context_window_tokens, resolved.response_reserve_tokens)
                 if resolved is not None and resolved.context_window_tokens is not None else None
             )
-            child_tools = tuple(tool for tool in tools if tool.read_only and tool.name != "run_shell")
+            if self._mcp_tools_factory is not None:
+                tools = (*tools, *await self._connect_mcp(mcp_stack, Path(session["workspace"]), cancel))
+            child_tools = tuple(tool for tool in tools if tool.read_only and getattr(tool, "subagent_allowed", True) and tool.name != "run_shell")
             subagents = SubagentManager(
                 client, child_tools, policy=policy, context_window=window,
                 limits=config.subagents if config is not None else SubagentConfig(),
@@ -266,8 +296,15 @@ class RunManager:
             )
             self.repository.finish_run(result, terminal_event=result.events[-1])
         except asyncio.CancelledError:
-            self.repository.interrupt_run(run_id)
-            raise
+            if cancel.is_set() and client is not None:
+                await mcp_stack.aclose()
+                result = await AgentRuntime(client, ToolRegistry()).run(
+                    prompt, cancel=cancel, run_id=run_id, history=history)
+                self.repository.finish_run(result, terminal_event=result.events[-1])
+            else:
+                self.repository.interrupt_run(run_id)
+            if asyncio.current_task().cancelling():
+                raise
         except Exception as exc:
             message = (
                 exc.public_message
@@ -276,13 +313,27 @@ class RunManager:
             )
             self.repository.fail_run(run_id, message)
         finally:
-            if client is not None:
-                closer = getattr(client, "aclose", None)
-                if closer is not None:
-                    try:
-                        await closer()
-                    except Exception:
-                        pass
+            async def close_resources():
+                try:
+                    await mcp_stack.aclose()
+                finally:
+                    if client is not None:
+                        closer = getattr(client, "aclose", None)
+                        if closer is not None:
+                            try:
+                                await closer()
+                            except Exception:
+                                pass
+            cleanup = asyncio.create_task(close_resources())
+            interrupted = False
+            while not cleanup.done():
+                try:
+                    await asyncio.shield(cleanup)
+                except asyncio.CancelledError:
+                    interrupted = True
+            cleanup.result()
+            if interrupted:
+                raise asyncio.CancelledError
 
     def _checkpoint(self, session_id: str) -> CompactionCheckpoint | None:
         payload = self.repository.latest_compaction(session_id)

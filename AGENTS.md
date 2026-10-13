@@ -4,14 +4,14 @@
 
 Nemo 是个人 Agent OS 与 Agent 技术实验平台：基础设施使用成熟库，Agent Runtime 与核心智能机制自行实现。
 
-Phase 2 的 M9 长期记忆与项目说明继承已交付，Phase 3 的 M10 Skills 已实现，M11 Subagents 正在推进，异步并行只读分派已实现，真实模型首轮复验完成。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
+Phase 2 的 M9 长期记忆与项目说明继承已交付，Phase 3 的 M10 Skills 已实现，M11 Subagents 的 Run 内并行只读协作与续轮已交付，M12 MCP 的外部工具连接与浏览器账号授权已交付。权威状态见 [docs/README.md](docs/README.md)，目标架构见 [NEMO_ARCHITECTURE.md](NEMO_ARCHITECTURE.md)。
 
 ## 目录职责
 
 - `src/nemo/core/`：领域契约、Runtime、Session、Context、模型与工具边界；不得依赖 FastAPI、SQLite、CLI 或 UI。
 - `src/nemo/adapters/`：HTTP、协议、Filesystem、Shell 与 Web 等基础设施适配器；`adapters/persistence/` 保存 SQLite schema、事件投影与 Repository。
 - `src/nemo/config/`：`config.toml`、密钥读取与原子配置编辑；具体适配器只由 `src/nemo/bootstrap.py` 装配。
-- `src/nemo/server/`：FastAPI HTTP/SSE、应用外观，以及 Session、Run、Catalog、Trace、Settings、Skills 用例；只编排 Core，不复制 Agent Loop。
+- `src/nemo/server/`：FastAPI HTTP/SSE、应用外观，以及 Session、Run、Catalog、Trace、Settings、Skills、MCP 用例；只编排 Core，不复制 Agent Loop。
 - `src/nemo/cli/`：`main.py` 只做参数与模式分派，`remote.py` 是默认 Server 客户端，`direct.py` 是直连恢复模式；其余模块负责审批、事件渲染、HTTP 客户端与 transcript。
 - `src/nemo/prompts/`：具名、可独立测试的系统提示条款、项目说明加载与随应用分发的内置技能指令。
 - `src/nemo/testing/`：无网络 Fake Model/Tool；测试不得在各文件重复造替身。

@@ -15,6 +15,10 @@ class ApiModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+class McpTestRequest(ApiModel):
+    workspace: str = Field(min_length=1, max_length=5000)
+
+
 class CreateSessionRequest(ApiModel):
     workspace: str = "."
     model: str | None = None
