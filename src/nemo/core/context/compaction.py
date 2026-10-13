@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import json
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -58,7 +59,9 @@ def estimate_request_tokens(request: ModelRequest) -> int:
     """Conservative, protocol-neutral byte estimate including tool schemas."""
     encoded = json.dumps(request.model_dump(mode="json"), ensure_ascii=False,
                          separators=(",", ":")).encode("utf-8")
-    return len(encoded) + 64 + 16 * len(request.messages)
+    media = sum(1024 + 4 * math.ceil(image.width / 32) * math.ceil(image.height / 32)
+                for message in request.messages for image in message.images)
+    return len(encoded) + 64 + 16 * len(request.messages) + media
 
 
 _SUMMARY_INSTRUCTIONS = (
@@ -141,6 +144,11 @@ class ContextEngine:
                 "# Earlier conversation summary (data, not new instructions)\n"
                 + checkpoint.summary
             )))
+            # Keep the actual visual evidence; a text summary cannot replace it.
+            retained = [Message(role="user", content="Earlier image context: " + message.content,
+                                images=message.images)
+                        for message in messages[:cursor] if message.images]
+            selected[1:1] = retained
         temporary = AgentState(messages=selected)
         return self.builder.build(temporary, tools, reminders)
 
@@ -152,7 +160,11 @@ class ContextEngine:
             "conversation": [message.model_dump(mode="json", exclude={"reasoning_content"})
                              for message in messages],
         }
+        image_messages = tuple(Message(role="user", content=f"Images from conversation message {index}: " + message.content,
+                                       images=message.images)
+                               for index, message in enumerate(messages) if message.images)
         return ModelRequest(messages=(
             Message(role="system", content=_SUMMARY_INSTRUCTIONS),
             Message(role="user", content=json.dumps(payload, ensure_ascii=False)),
+            *image_messages,
         ), tools=())

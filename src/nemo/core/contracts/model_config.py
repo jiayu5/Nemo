@@ -12,7 +12,7 @@ from nemo.core.contracts.types import Contract
 from nemo.core.contracts.mcp import McpServerConfig
 
 ProtocolName = Literal["openai_responses", "openai_compatible", "anthropic_messages"]
-Capability = Literal["tool_calling", "streaming"]
+Capability = Literal["tool_calling", "streaming", "image_input"]
 SelectionSource = Literal["run", "session", "agent", "default"]
 
 NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]

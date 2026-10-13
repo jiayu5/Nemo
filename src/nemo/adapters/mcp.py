@@ -18,6 +18,7 @@ import httpx
 
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.errors import ToolFailure, first_public_message
+from nemo.core.contracts.mcp import McpToolSet, SkippedConnection
 from nemo.core.contracts.types import Contract
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.tools.limits import truncate_text
@@ -258,8 +259,7 @@ class McpConnection:
                 # Expected failures carry an actionable, secret-free message:
                 # an unauthorized account must say so instead of failing opaquely.
                 self._ready.set_exception(ToolFailure(
-                    first_public_message(exc) or getattr(self._http_client, "failure_message", None)
-                    or "MCP connection or tool discovery failed"))
+                    connection_failure_reason(exc, self._http_client)))
         finally:
             if self.state != "failed":
                 self.state = "disconnected"
@@ -296,17 +296,65 @@ class McpConnection:
             raise asyncio.CancelledError
 
 
+def connection_failure_reason(exc: BaseException, http_client=None) -> str:
+    """Return the first safe, actionable reason for a failed connection or discovery."""
+
+    return (first_public_message(exc) or getattr(http_client, "failure_message", None)
+            or "MCP connection or tool discovery failed")
+
+
+def skip_reason(server_id, config, oauth_manager) -> str | None:
+    """Report why an enabled connection cannot serve this Run, using local state only.
+
+    Runs never open a browser and never wait for sign-in, so a connection without a
+    saved account token is reported here instead of being asked to authorize.
+    """
+
+    if config.auth_mode != "oauth":
+        return None
+    if oauth_manager is None:
+        return "MCP sign-in is unavailable; connect the account in MCP settings"
+    status = oauth_manager.status(server_id, config)
+    state = status.get("status") if isinstance(status, dict) else status
+    if state in {"connected", "not_required"}:
+        return None
+    if state == "authorizing":
+        return "MCP sign-in is still in progress; finish it in MCP settings and start a new run"
+    return "MCP account needs authorization; connect it in MCP settings"
+
+
 @asynccontextmanager
 async def connect_tools(servers, workspace: Path, *, secret_loader=None, http_client_factory=McpHttpClient, oauth_manager=None):
+    """Start the ready connections; unusable ones are reported and skipped.
+
+    MCP tools augment a Run and never decide whether it can start: connections that are
+    not authorized, unreachable or broken are listed in ``McpToolSet.skipped`` so the
+    Run can name what is missing instead of failing. Cancellation still propagates.
+    """
+
     connections = []
+    skipped = []
     try:
         for server_id, config in servers.items():
-            if config.enabled:
+            if not config.enabled:
+                continue
+            reason = skip_reason(server_id, config, oauth_manager)
+            if reason is None:
                 connection = McpConnection(server_id, config, workspace, secret_loader=secret_loader,
                     http_client_factory=http_client_factory, oauth_manager=oauth_manager)
                 connections.append(connection)
-                await connection.start()
-        yield tuple(tool for connection in connections for tool in connection.tools)
+                try:
+                    await connection.start()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    reason = connection_failure_reason(exc, connection._http_client)
+            if reason is not None:
+                skipped.append(SkippedConnection(server_id=server_id, reason=reason))
+        yield McpToolSet(
+            tools=tuple(tool for connection in connections for tool in connection.tools),
+            skipped=tuple(skipped),
+        )
     finally:
         cancelled = False
         for connection in reversed(connections):

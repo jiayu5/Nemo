@@ -1,4 +1,5 @@
 """Validated user configuration for external tool connections."""
+from dataclasses import dataclass
 from urllib.parse import urlsplit
 from pydantic import Field, model_validator
 from typing import Annotated
@@ -7,6 +8,26 @@ EnvName = Annotated[str, StringConstraints(pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
 NonEmptyStr = Annotated[str, StringConstraints(min_length=1)]
 from nemo.core.contracts.types import Contract
 from typing import Literal
+
+
+@dataclass(frozen=True)
+class SkippedConnection:
+    """An enabled connection this Run did not load, with a safe, secret-free reason."""
+
+    server_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class McpToolSet:
+    """Tools of the ready connections for one Run.
+
+    MCP augments a Run instead of gating it: a connection that is not authorized,
+    unreachable or broken is reported through ``skipped`` and the Run continues.
+    """
+
+    tools: tuple[object, ...] = ()
+    skipped: tuple[SkippedConnection, ...] = ()
 
 
 class McpServerConfig(Contract):

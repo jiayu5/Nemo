@@ -75,6 +75,10 @@ export function InspectorPanel({
             </details>
           ) : event.type === "context.compression_completed" ? (
             <span>Compression model call · prompt {String(event.payload.prompt_tokens ?? "unknown")} · reply {String(event.payload.completion_tokens ?? "unknown")} tokens</span>
+          ) : event.type === "mcp.connection_skipped" ? (
+            <span>
+              {event.payload.server_id ? `MCP ${String(event.payload.server_id)}` : "MCP tools"} not loaded · {String(event.payload.reason ?? "")}
+            </span>
           ) : <span>{event.type}</span>}
           <small>step {event.step}</small>
         </div>

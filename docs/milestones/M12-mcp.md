@@ -16,7 +16,7 @@
 
 ## 3. 关键决策
 
-协议与 OAuth 基础设施复用官方 SDK 1.x，Runtime 保持自行实现，Core 不依赖 SDK 或 HTTP。Server 每个 Run 连接已启用服务并冻结工具目录；直连 CLI 持有进程期连接。SDK context manager 由专用任务进入和退出，父 Runtime 排空子任务后关闭连接。
+协议与 OAuth 基础设施复用官方 SDK 1.x，Runtime 保持自行实现，Core 不依赖 SDK 或 HTTP。Server 每个 Run 连接已启用服务并冻结工具目录；直连 CLI 持有进程期连接。SDK context manager 由专用任务进入和退出，父 Runtime 排空子任务后关闭连接。2026-10-13 修订：MCP 改为可选增强，未就绪或建立失败的连接只跳过并记录 `mcp.connection_skipped` 事件，不再使本 Run 失败；原"连接失败使本 Run 明确失败"的结论作废，现行行为见 [MCP 参考](../reference/mcp.md)。
 
 服务端只读提示不授予权限，子任务能力另设白名单。手动凭据只通过环境变量引用加载；OAuth 凭据按连接指纹保存在用户目录的 0600 文件，不写入项目、配置或事件。普通 Run 和连接测试只复用授权并静默刷新，不打开浏览器。断开使用代际校验拒绝迟到的凭据写入，只清除本地授权。代理必须显式配置；业务调用失败不自动重试，不改变数据库 schema。
 

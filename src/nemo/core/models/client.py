@@ -121,6 +121,10 @@ class ModelClient:
             await closer()
 
     def _require_capabilities(self, request: ModelRequest) -> None:
+        if any(message.images for message in request.messages) and "image_input" not in self.resolved.capabilities:
+            raise CapabilityError(
+                f"Model '{self.resolved.model_name}' does not declare the 'image_input' capability"
+            )
         if request.tools and "tool_calling" not in self.resolved.capabilities:
             raise CapabilityError(
                 f"Model '{self.resolved.model_name}' does not declare the "

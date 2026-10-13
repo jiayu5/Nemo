@@ -5,10 +5,8 @@ from uuid import uuid4
 from datetime import datetime, timezone
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
-
-class Contract(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+from nemo.core.contracts.base import Contract
+from nemo.core.contracts.images import ImageRef, MAX_IMAGES
 
 
 class ToolCall(Contract):
@@ -31,12 +29,15 @@ class ToolResult(Contract):
 class Message(Contract):
     role: Literal["system", "user", "assistant", "tool"]
     content: str = ""
+    images: tuple[ImageRef, ...] = Field(default=(), max_length=MAX_IMAGES)
     reasoning_content: str = ""
     tool_calls: tuple[ToolCall, ...] = ()
     tool_result: ToolResult | None = None
 
     @model_validator(mode="after")
     def validate_role(self):
+        if self.images and self.role != "user":
+            raise ValueError("Only user messages may contain images")
         if self.reasoning_content and self.role != "assistant":
             raise ValueError("Only assistant messages may contain reasoning content")
         if self.tool_calls and self.role != "assistant":

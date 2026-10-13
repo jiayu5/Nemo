@@ -56,9 +56,11 @@ async def serve_direct(args, output: Streams, directory: Path, client_factory) -
     client = client_factory(run_override=args.model)
     try:
         async with AsyncExitStack() as stack:
-            mcp_tools = await stack.enter_async_context(build_mcp_tools(workspace))
+            toolset = await stack.enter_async_context(build_mcp_tools(workspace))
+            for skipped in toolset.skipped:
+                output.write(f"MCP {skipped.server_id} is not loaded in this session: {skipped.reason}\n")
             return await _serve_connected(args, output, directory, client, workspace,
-                                          session, path, resumed, checkpoint, mcp_tools)
+                                          session, path, resumed, checkpoint, toolset.tools)
     finally:
         closer = getattr(client, "aclose", None)
         if closer is not None:

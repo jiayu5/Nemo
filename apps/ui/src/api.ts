@@ -4,6 +4,7 @@ import type {
   ApprovalMode, InstalledSkills, SkillDetail, McpConfig, McpServer, McpToolInfo, McpAuthorization,
   MemoryState, MemoryDraft, MemoryEntry,
   Message,
+  ImageRef,
   ModelOption,
   Provider,
   ProviderDeleteResult,
@@ -100,6 +101,17 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  uploadImage: (sessionId: string, file: File) =>
+    request<ImageRef>(`/sessions/${encodeURIComponent(sessionId)}/images`, {
+      method: "POST", body: file, headers: { "Content-Type": file.type },
+    }),
+  imageBlob: async (sessionId: string, assetId: string, signal?: AbortSignal) => {
+    const target = await endpoint();
+    const response = await fetch(`${target.base}/sessions/${encodeURIComponent(sessionId)}/images/${encodeURIComponent(assetId)}`,
+      { headers: target.headers, signal });
+    if (!response.ok) throw new Error("Image is missing or inaccessible");
+    return response.blob();
+  },
   mcpServers: () => request<{ servers: McpServer[] }>("/mcp"),
   authorizeMcp: (id: string, workspace: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth/start`, { method: "POST", body: JSON.stringify({ workspace }) }),
   mcpAuthorization: (id: string) => request<McpAuthorization>(`/mcp/${encodeURIComponent(id)}/oauth`),
@@ -168,10 +180,10 @@ export const api = {
       method: "PUT",
       body: JSON.stringify({ model }),
     }),
-  startRun: (sessionId: string, prompt: string) =>
+  startRun: (sessionId: string, prompt: string, images: ImageRef[] = []) =>
     request<Run>(`/sessions/${sessionId}/runs`, {
       method: "POST",
-      body: JSON.stringify({ prompt, max_steps: 10 }),
+      body: JSON.stringify({ prompt, max_steps: 10, ...(images.length ? { images: images.map((image) => image.asset_id) } : {}) }),
     }),
   cancelRun: (runId: string) =>
     request<{ status: string }>(`/runs/${runId}/cancel`, { method: "POST" }),

@@ -21,6 +21,7 @@ const blankDraft: ProviderSettingsDraft = {
   context_window_tokens: null,
   response_reserve_tokens: 2048,
   tool_calling: true,
+  image_input: false,
   make_default: true,
   api_key: { action: "replace", value: "" },
   proxy: { action: "keep" },
@@ -43,6 +44,7 @@ function draftFor(provider: SettingsProvider, modelIndex = 0): ProviderSettingsD
     context_window_tokens: model?.context_window_tokens ?? null,
     response_reserve_tokens: model?.response_reserve_tokens ?? 2048,
     tool_calling: model?.capabilities.includes("tool_calling") ?? true,
+    image_input: model?.capabilities.includes("image_input") ?? false,
     make_default: model?.is_default ?? false,
     api_key: { action: "keep" },
     proxy: { action: "keep" },
@@ -385,6 +387,10 @@ export function ProviderSettingsPanel({ settings, onSaved }: Props) {
             </label>
           </div>
           <div className="settings-options">
+            <label className="settings-check">
+              <input type="checkbox" checked={draft.image_input ?? false} onChange={(event) => update("image_input", event.target.checked)} />
+              <span><b>Image input</b><small>Enable only for a model that supports vision.</small></span>
+            </label>
             <label className="settings-check">
               <input type="checkbox" checked={draft.tool_calling} onChange={(event) => update("tool_calling", event.target.checked)} />
               <span><b>Tool calling</b><small>Let the model use Nemo tools.</small></span>

@@ -14,6 +14,7 @@ import type {
   RunEvent,
   Session,
   Trace,
+  ImageRef,
 } from "../types";
 
 function message(reason: unknown, fallback: string): string {
@@ -37,6 +38,12 @@ export function useNemoWorkspace() {
   const [approval, setApproval] = useState<ApprovalRequest | null>(null);
   const [workspace, setWorkspace] = useState(".");
   const [prompt, setPrompt] = useState("");
+  const [images, setImages] = useState<ImageRef[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const uploadingRef = useRef(false);
+  const submittingRef = useRef(false);
+  const sessionRef = useRef<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const streamRef = useRef<RunSubscription | null>(null);
 
@@ -91,6 +98,11 @@ export function useNemoWorkspace() {
 
   const loadSession = useCallback(async (session: Session, resume = false) => {
     if (resume) session = await api.resumeSession(session.session_id);
+    if (sessionRef.current !== session.session_id) {
+      setImages([]);
+      setPrompt("");
+    }
+    sessionRef.current = session.session_id;
     streamRef.current?.close();
     streamRef.current = null;
     setActiveRun(null);
@@ -280,32 +292,82 @@ export function useNemoWorkspace() {
     }
   }
 
+  async function addImages(files: File[]) {
+    if (!selected || activeRun || uploadingRef.current || submittingRef.current || !files.length) return;
+    const sessionId = selected.session_id;
+    const model = models.find((item) => item.selection === selected.model)
+      ?? models.find((item) => item.is_default);
+    if (!model?.capabilities.includes("image_input")) {
+      setError("Select a vision model with Image input enabled in Connections.");
+      return;
+    }
+    if (images.length + files.length > 8) { setError("A message supports at most 8 images."); return; }
+    if (files.some((file) => !["image/png", "image/jpeg", "image/webp"].includes(file.type)
+      || file.size === 0 || file.size > 10 * 1024 * 1024)) {
+      setError("Use PNG, JPEG or WebP images, up to 10 MiB each."); return;
+    }
+    if (images.reduce((sum, image) => sum + image.size_bytes, 0)
+      + files.reduce((sum, file) => sum + file.size, 0) > 20 * 1024 * 1024) {
+      setError("Message images exceed the 20 MiB limit."); return;
+    }
+    uploadingRef.current = true;
+    setUploading(true);
+    setError(null);
+    try {
+      for (const file of files) {
+        if (sessionRef.current !== sessionId) break;
+        const image = await api.uploadImage(sessionId, file);
+        if (sessionRef.current === sessionId) setImages((current) => [...current, image]);
+      }
+    } catch (reason) {
+      if (sessionRef.current === sessionId) setError(message(reason, "Could not upload image"));
+    } finally {
+      uploadingRef.current = false;
+      setUploading(false);
+    }
+  }
+
+  function removeImage(index: number) {
+    if (!uploadingRef.current && !submittingRef.current) setImages((current) => current.filter((_, position) => position !== index));
+  }
+
   async function submitPrompt(event: FormEvent) {
     event.preventDefault();
-    if (!selected || !prompt.trim() || activeRun) return;
+    if (!selected || (!prompt.trim() && !images.length) || activeRun || uploadingRef.current || submittingRef.current) return;
+    submittingRef.current = true;
+    setSubmitting(true);
     const text = prompt.trim();
+    const attached = images;
+    const sessionId = selected.session_id;
     setPrompt("");
+    setImages([]);
     setLiveText("");
     setLiveReasoning("");
     setError(null);
     setMessages((current) => [
       ...current,
-      { role: "user", content: text, tool_calls: [], tool_result: null },
+      { role: "user", content: text, images: attached, tool_calls: [], tool_result: null },
     ]);
     try {
-      const run = await api.startRun(selected.session_id, text);
+      const run = await api.startRun(sessionId, text, attached);
+      if (sessionRef.current !== sessionId) return;
       setActiveRun(run);
       setEvents([]);
       setTrace(null);
       watchRun(run);
     } catch (reason) {
+      if (sessionRef.current !== sessionId) return;
       setMessages((current) => current.slice(0, -1));
       setPrompt(text);
+      setImages(attached);
       if (selected) {
         try { await loadSession(selected); } catch { /* Keep the original error. */ }
       }
       setError(message(reason, "Could not start run"));
       setActiveRun(null);
+    } finally {
+      submittingRef.current = false;
+      setSubmitting(false);
     }
   }
 
@@ -362,6 +424,7 @@ export function useNemoWorkspace() {
     serverOnline, sessions, selected, messages, liveText, liveReasoning, runs, events, trace, models, providers,
     providerSettings,
     activeRun, approval, workspace, prompt, error, setWorkspace, setPrompt,
+    images, uploading, submitting, addImages, removeImage,
     createSession, pickWorkspace, deleteSession, selectSession, submitPrompt, answerApproval, updateMode, updateModel,
     selectRun, cancelRun, refreshConfiguration,
   };

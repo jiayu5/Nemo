@@ -21,6 +21,7 @@ from nemo.adapters.tools.filesystem import (
 )
 from nemo.adapters.tools.search import SearchWorkspaceTool
 from nemo.adapters.memory import FileMemoryStore
+from nemo.adapters.images import FileImageStore
 from nemo.adapters.tools.memory import SearchMemoryTool, ReadMemoryTool, SaveMemoryTool, ForgetMemoryTool
 from nemo.adapters.tools.history import SearchSessionsTool, ReadSessionTool
 from nemo.core.memory import MemoryStore
@@ -123,6 +124,7 @@ def build_model_client(
     transport: Transport | None = None,
     secret_loader: SecretLoader | None = None,
     environ: Mapping[str, str] | None = None,
+    image_loader=None,
 ) -> ModelClient:
     """Assemble a runtime-ready client; raises before any network call if unusable."""
 
@@ -135,7 +137,8 @@ def build_model_client(
     )
     return ModelClient(
         resolved=resolved,
-        adapter=build_adapter(resolved.protocol),
+        adapter=(OpenAICompatibleAdapter(image_loader) if image_loader is not None
+                 and resolved.protocol == "openai_compatible" else build_adapter(resolved.protocol)),
         transport=transport
         or HttpxTransport(
             proxy=loader.load(resolved.proxy_env) if resolved.proxy_env else None
@@ -148,8 +151,8 @@ def build_model_client(
 async def build_mcp_tools(workspace: Path):
     # No MCP configuration exists before the first model setup.
     config = ConfigEditor().load_optional()
-    async with connect_tools(config.mcp_servers if config else {}, workspace, oauth_manager=MCP_OAUTH) as tools:
-        yield tools
+    async with connect_tools(config.mcp_servers if config else {}, workspace, oauth_manager=MCP_OAUTH) as toolset:
+        yield toolset
 
 
 async def probe_mcp(server_id, config, workspace: Path):
@@ -174,6 +177,7 @@ def build_server_application(database_path: Path | str) -> NemoApplication:
     memory_store = build_memory_store(config_editor)
     return NemoApplication(
         repository,
+        image_store=FileImageStore(Path(database_path).resolve().parent / "images"),
         skill_catalog_factory=build_skill_catalog,
         skill_management_store=FileSkillManagementStore(
             Path.home() / ".nemo" / "skills", builtin_root=BUILTIN_SKILLS_ROOT),

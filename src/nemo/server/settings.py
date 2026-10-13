@@ -91,9 +91,11 @@ class SettingsService:
                 context_window_tokens=window,
                 response_reserve_tokens=reserve,
                 capabilities=(
-                    frozenset({"tool_calling"})
-                    if request.tool_calling
-                    else frozenset()
+                    (frozenset({"tool_calling"}) if request.tool_calling else frozenset())
+                    | (frozenset({"image_input"}) if (
+                        request.image_input if "image_input" in request.model_fields_set
+                        else previous is not None and "image_input" in previous.capabilities
+                    ) else frozenset())
                 ),
             )
         except ValidationError as exc:

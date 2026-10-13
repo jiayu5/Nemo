@@ -67,6 +67,9 @@ export default function App() {
           activeRun={workspace.activeRun}
           approval={workspace.approval}
           prompt={workspace.prompt}
+          images={workspace.images} uploading={workspace.uploading} submitting={workspace.submitting}
+          onAddImages={(files) => void workspace.addImages(files)}
+          onRemoveImage={workspace.removeImage}
           onPromptChange={workspace.setPrompt}
           onSubmit={workspace.submitPrompt}
           onStop={() => void workspace.cancelRun()}

@@ -32,12 +32,15 @@
 | M10 · Skills | 已完成 | 2026-10-09 | [M10](milestones/M10-skills.md) |
 | M11 · Subagents | 已完成：Run 内并行只读协作与续轮 | 2026-10-12 | [M11](milestones/M11-subagents.md) |
 | M12 · MCP 连接与账号授权 | 已交付；第三方账号最终验收未完成 | 2026-10-13 | [M12](milestones/M12-mcp.md) |
+| M14 · 图片输入 | 已完成 | 2026-10-13 | [M14](milestones/M14-image-input.md) |
 
-Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 已交付 Run 内并行只读协作与续轮；M12 MCP 已交付外部工具连接与 HTTP 浏览器账号授权，本阶段收尾。M9 记忆与 M10 技能的真实模型使用已由用户在真实会话中验收；自动化测试仍使用 Fake Model，不消耗模型 API。
+Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 的其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 已交付 Run 内并行只读协作与续轮；M12 MCP 已交付外部工具连接与 HTTP 浏览器账号授权；M14 已交付图片输入，图像生成仍未实现。M9 记忆、M10 技能与 M14 图片输入的真实模型使用已由用户在真实会话中验收；自动化测试仍使用 Fake Model，不消耗模型 API。
 
 ## 现行参考
 
 - [MCP](reference/mcp.md)：连接配置、浏览器账号授权、管理 API、工具、权限与资源清理。
+
+- [图片输入](reference/images.md)：上传与读取 API、存储与限额、能力声明、请求编码、历史保留与界面行为。
 
 - [Subagents](reference/subagents.md)：异步并行分派、独立上下文、可配置预算、完整报告分页与部分报告、Run 内续轮、能力限制、嵌套事件与可查看详情。
 

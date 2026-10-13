@@ -24,6 +24,7 @@ class EventType(StrEnum):
     TOOL_FAILED = "tool.failed"
     APPROVAL_REQUESTED = "approval.requested"
     APPROVAL_RESOLVED = "approval.resolved"
+    MCP_CONNECTION_SKIPPED = "mcp.connection_skipped"
     OBSERVER_FAILED = "observer.failed"
     SUBAGENT_EVENT = "subagent.event"
 

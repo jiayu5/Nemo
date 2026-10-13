@@ -34,8 +34,23 @@ class CreateSessionRequest(ApiModel):
 
 
 class CreateRunRequest(ApiModel):
-    prompt: str = Field(min_length=1)
+    prompt: str = ""
+    images: list[str] = Field(default_factory=list, max_length=8)
     max_steps: int = Field(default=10, ge=1, le=100)
+
+    @field_validator("images")
+    @classmethod
+    def valid_image_ids(cls, value: list[str]) -> list[str]:
+        import re
+        if any(not re.fullmatch(r"[a-f0-9]{64}", item) for item in value):
+            raise ValueError("Invalid image reference")
+        return value
+
+    @model_validator(mode="after")
+    def require_input(self):
+        if not self.prompt.strip() and not self.images:
+            raise ValueError("A message requires text or images")
+        return self
 
 
 class UpdateSessionRequest(ApiModel):
@@ -152,6 +167,7 @@ class ProviderSettingsRequest(ApiModel):
     context_window_tokens: int | None = Field(default=None, ge=1024)
     response_reserve_tokens: int = Field(default=2048, ge=1)
     tool_calling: bool = True
+    image_input: bool = False
     make_default: bool = False
     api_key: SecretMutation = Field(default_factory=SecretMutation)
     proxy: SecretMutation = Field(default_factory=SecretMutation)

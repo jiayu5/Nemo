@@ -6,9 +6,9 @@ M12 使用官方 Python MCP SDK 1.x 接入外部工具。Server（Web/Desktop、
 
 顶部 **MCP** 打开独立弹窗。可添加、编辑、启用、移除连接，为 HTTP 连接登录账号，测试已保存的配置，查看发现的工具和参数，并为工具勾选只读及子 Agent 权限。列表显示上次测试结果与授权状态，不代表长期连接在线；保存和打开列表不启动进程、不访问 MCP 服务。Test 会执行初始化与工具发现，结束后关闭连接，不调用模型或业务工具。
 
-需要账号的 HTTP 连接用 **Browser sign-in** 登录，见 [账号授权](#账号授权oauth)。未授权的连接不能用于 Run，启用后会在本 Run 明确失败并提示先登录。
+需要账号的 HTTP 连接用 **Browser sign-in** 登录，见 [账号授权](#账号授权oauth)。Run 内不打开浏览器也不等待登录：没有可用令牌的连接（未登录、需要重新授权、授权进行中）不进入本 Run，缺失的工具以 `mcp.connection_skipped` 事件说明。
 
-新连接默认禁用。启用后的连接在每个 Server Run 启动时建立，工具目录在本 Run 内冻结；修改配置影响下一 Run，当前 Run 继续使用原连接。直连 CLI 启动时建立，退出后关闭，变更需重启直连 CLI。连接失败或发现失败使本 Run 明确失败，不悄悄漏掉已启用工具。连接初始化先于模型调用。
+新连接默认禁用。启用后的连接在每个 Server Run 启动时建立，工具目录在本 Run 内冻结；修改配置影响下一 Run，当前 Run 继续使用原连接。直连 CLI 启动时建立，退出后关闭，变更需重启直连 CLI。MCP 是可选增强，不决定 Run 能否开始：连接未就绪、连接失败或工具发现失败都只跳过该连接，并以 `mcp.connection_skipped` 事件给出连接名与安全原因，本 Run 继续使用其余工具；MCP 层的意外异常降级为一次跳过事件，`server_id` 为空。连接尝试仍先于模型调用。
 
 MCP 配置保存在 `~/.nemo/config.toml`，需要先配置模型。保存 MCP 配置不修改 `.env`，Provider 或 Memory 设置编辑会保留 MCP 配置。
 
@@ -67,7 +67,7 @@ subagent_tools = []
 
 凭据保存在 `~/.nemo/mcp-oauth/<连接指纹>.json`（权限 600，同目录加锁写入），不写入 `config.toml` 或 `.env`。连接指纹包含 URL、应用标识与回调策略，修改这些字段会失效旧凭据。Disconnect account 递增代际再删除令牌，因此授权完成后才到达的迟到写入会被拒绝；令牌只在发请求时使用，不进入模型上下文、事件或 Trace，状态查询也不返回凭据值。
 
-授权状态取值：`not_required`（不需要登录）、`not_connected`、`authorizing`、`connected`、`needs_authorization`（令牌过期且无法刷新）、`failed`、`cancelled`。需要登录的 HTTP 连接在 Run、连接测试与直连 CLI 中都不会打开浏览器，只使用已保存的令牌；缺少有效令牌时明确失败并要求在 MCP 设置中登录。
+授权状态取值：`not_required`（不需要登录）、`not_connected`、`authorizing`、`connected`、`needs_authorization`（令牌过期且无法刷新）、`failed`、`cancelled`。需要登录的 HTTP 连接在 Run、连接测试与直连 CLI 中都不会打开浏览器，只使用已保存的令牌；缺少有效令牌时该连接不进入本 Run，并在 Run 事件中提示先在 MCP 设置中登录。
 
 令牌兑换与刷新明确请求 `application/json`，避免授权服务器默认返回表单格式而导致 SDK 解析失败。服务返回的凭据拒绝、回调地址不匹配、授权码过期等已知错误映射为安全提示，不展示原始响应。浏览器接受授权不等于 Nemo 已连接：仍需完成兑换与工具发现；前端等待发现完成后再结束授权状态轮询。
 

@@ -14,7 +14,10 @@ from nemo.config.loader import load_config
 from nemo.core.context.builder import ContextBuilder
 from nemo.core.context.compaction import CompactionCheckpoint, ContextWindow
 from nemo.core.contracts.events import EventType
-from nemo.core.contracts.errors import NemoError
+from nemo.core.contracts.images import ImageRef, ImageStore, MAX_REQUEST_IMAGE_BYTES
+from nemo.core.contracts.errors import ToolFailure, CapabilityError
+from nemo.core.contracts.errors import NemoError, first_public_message
+from nemo.core.contracts.mcp import McpToolSet, SkippedConnection
 from nemo.core.contracts.tools import ExecutionContext
 from nemo.core.contracts.types import Event
 from nemo.core.runtime.agent import AgentRuntime
@@ -50,8 +53,10 @@ class RunManager:
         approval_timeout_seconds: float = 300.0,
         config_loader: Callable[[], Any] = load_config,
         mcp_tools_factory=None,
+        image_store: ImageStore | None = None,
     ) -> None:
         self.repository = repository
+        self.image_store = image_store
         self.memory_store = memory_store
         self._client_factory = client_factory
         self._tools_factory = tools_factory
@@ -105,7 +110,19 @@ class RunManager:
         *,
         prompt: str,
         max_steps: int,
+        images: tuple[ImageRef, ...] = (),
     ) -> dict[str, Any]:
+        all_images = [ref for message in self.repository.messages(session["session_id"])
+                      for ref in message.images] + list(images)
+        if all_images:
+            config = self._config_loader()
+            from nemo.core.models.registry import ModelRegistry
+            from nemo.core.models.resolver import ModelResolver
+            resolved = ModelResolver(ModelRegistry(config)).resolve(run_override=session["model"])
+            if "image_input" not in resolved.capabilities:
+                raise CapabilityError("Selected model does not declare image_input; enable it for a vision model")
+            if sum(ref.size_bytes for ref in all_images) > MAX_REQUEST_IMAGE_BYTES:
+                raise ToolFailure("Conversation images exceed the 20 MiB request limit")
         catalog = (self._skill_catalog_loader(session["session_id"])
                    if self._skill_catalog_loader else None)
         session = {**session, "_skill_catalog": catalog}
@@ -119,7 +136,7 @@ class RunManager:
         cancel = asyncio.Event()
         self._cancel[run_id] = cancel
         task = asyncio.create_task(
-            self._execute(run_id, session, prompt, max_steps, cancel),
+            self._execute(run_id, session, prompt, max_steps, cancel, images),
             name=f"nemo-run-{run_id}",
         )
         self._tasks[run_id] = task
@@ -177,14 +194,28 @@ class RunManager:
             self._record_approval_outcome(run_id, request_id, outcome)
             future.set_result(outcome)
 
-    async def _connect_mcp(self, stack, workspace: Path, cancel: asyncio.Event):
+    async def _connect_mcp(self, stack, workspace: Path, cancel: asyncio.Event,
+                           run_id: str) -> McpToolSet:
+        """Load MCP tools as an optional extra; unusable connections never fail the Run."""
+
         connecting = asyncio.create_task(stack.enter_async_context(self._mcp_tools_factory(workspace)))
         stopping = asyncio.create_task(cancel.wait())
+        toolset = McpToolSet()
         try:
-            done, _ = await asyncio.wait((connecting, stopping), return_when=asyncio.FIRST_COMPLETED)
-            if stopping in done:
-                raise asyncio.CancelledError
-            return await connecting
+            try:
+                done, _ = await asyncio.wait((connecting, stopping), return_when=asyncio.FIRST_COMPLETED)
+                if stopping in done:
+                    raise asyncio.CancelledError
+                loaded = await connecting
+                toolset = loaded if isinstance(loaded, McpToolSet) else McpToolSet(tools=tuple(loaded))
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                # MCP is optional infrastructure: a broken connection list, an unreadable
+                # configuration or an unexpected adapter failure must not gate the Run.
+                toolset = McpToolSet(skipped=(SkippedConnection(
+                    server_id=None,
+                    reason=first_public_message(exc) or "MCP tools were unavailable for this run"),))
         finally:
             for task in (connecting, stopping):
                 if not task.done() and not task.cancelling():
@@ -199,6 +230,14 @@ class RunManager:
             drain.result()
             if interrupted:
                 raise asyncio.CancelledError
+        for skipped in toolset.skipped:
+            self.repository.append_event(
+                run_id=run_id,
+                step=0,
+                kind=EventType.MCP_CONNECTION_SKIPPED,
+                payload={"server_id": skipped.server_id, "reason": skipped.reason},
+            )
+        return toolset
 
     async def _execute(
         self,
@@ -207,6 +246,7 @@ class RunManager:
         prompt: str,
         max_steps: int,
         cancel: asyncio.Event,
+        images: tuple[ImageRef, ...] = (),
     ) -> None:
         client = None
         history = ()
@@ -214,7 +254,9 @@ class RunManager:
         mcp_stack = AsyncExitStack()
         try:
             self.repository.set_run_running(run_id)
-            client = self._client_factory(run_override=session["model"])
+            image_options = ({"image_loader": lambda asset_id: self.image_store.get(session["session_id"], asset_id)}
+                             if self.image_store is not None else {})
+            client = self._client_factory(run_override=session["model"], **image_options)
             resolved = getattr(client, "resolved", None)
             config = self._config_loader() if resolved is not None else None
             if resolved is not None:
@@ -243,7 +285,8 @@ class RunManager:
                 if resolved is not None and resolved.context_window_tokens is not None else None
             )
             if self._mcp_tools_factory is not None:
-                tools = (*tools, *await self._connect_mcp(mcp_stack, Path(session["workspace"]), cancel))
+                toolset = await self._connect_mcp(mcp_stack, Path(session["workspace"]), cancel, run_id)
+                tools = (*tools, *toolset.tools)
             child_tools = tuple(tool for tool in tools if tool.read_only and getattr(tool, "subagent_allowed", True) and tool.name != "run_shell")
             subagents = SubagentManager(
                 client, child_tools, policy=policy, context_window=window,
@@ -288,6 +331,7 @@ class RunManager:
 
             result = await runtime.run(
                 prompt,
+                images=images,
                 max_steps=max_steps,
                 cancel=cancel,
                 on_event=persist,
@@ -299,7 +343,7 @@ class RunManager:
             if cancel.is_set() and client is not None:
                 await mcp_stack.aclose()
                 result = await AgentRuntime(client, ToolRegistry()).run(
-                    prompt, cancel=cancel, run_id=run_id, history=history)
+                    prompt, images=images, cancel=cancel, run_id=run_id, history=history)
                 self.repository.finish_run(result, terminal_event=result.events[-1])
             else:
                 self.repository.interrupt_run(run_id)

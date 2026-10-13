@@ -22,9 +22,18 @@ export interface ToolResult {
   error: { code: string; message: string } | null;
 }
 
+export interface ImageRef {
+  asset_id: string;
+  mime_type: "image/png" | "image/jpeg" | "image/webp";
+  size_bytes: number;
+  width: number;
+  height: number;
+}
+
 export interface Message {
   role: "system" | "user" | "assistant" | "tool";
   content: string;
+  images?: ImageRef[];
   reasoning_content?: string;
   tool_calls: ToolCall[];
   tool_result: ToolResult | null;
@@ -121,6 +130,7 @@ export interface ProviderSettingsDraft {
   context_window_tokens: number | null;
   response_reserve_tokens: number;
   tool_calling: boolean;
+  image_input?: boolean;
   make_default: boolean;
   api_key: { action: SecretAction; value?: string };
   proxy: { action: SecretAction; value?: string };

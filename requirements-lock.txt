@@ -20,6 +20,7 @@ jsonschema==4.26.0
 macholib==1.16.4
 mcp==1.30.0
 packaging==26.3
+pillow==12.3.0
 pycparser==3.11
 pydantic-core==2.46.5
 pydantic-settings==2.15.0

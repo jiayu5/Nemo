@@ -10,6 +10,7 @@ from nemo.core.context.compaction import (
 )
 from nemo.core.context.reminder import describe, final_report, fit_reminders, slot_open, step_budget
 from nemo.core.contracts.events import EventType
+from nemo.core.contracts.images import ImageRef
 from nemo.core.contracts.types import (
     AgentState, Event, Message, Model, ModelReasoningDelta, ModelResponse, ModelTextDelta,
     ModelUsage, RunResult, RunStatus, ToolError, ToolResult,
@@ -31,6 +32,7 @@ class AgentRuntime:
                                if context_window else None)
 
     async def run(self, prompt: str, *, max_steps: int = 10,
+                  images: Sequence[ImageRef] = (),
                   cancel: asyncio.Event | None = None,
                   on_event: Callable[[Event], None] | None = None,
                   history: Sequence[Message] = (),
@@ -46,7 +48,7 @@ class AgentRuntime:
         state = AgentState(
             **({"run_id": run_id} if run_id is not None else {}),
             messages=[m.model_copy(deep=True) for m in history]
-            + [Message(role="user", content=prompt)]
+            + [Message(role="user", content=prompt, images=tuple(images))]
         )
         events: list[Event] = []
         partial_text: list[str] = []

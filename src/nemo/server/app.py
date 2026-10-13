@@ -10,9 +10,10 @@ from pathlib import Path
 
 from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 
-from nemo.core.contracts.errors import ConfigError, NemoError, ToolFailure
+from nemo.core.contracts.errors import ConfigError, NemoError, ToolFailure, CapabilityError
+from nemo.core.contracts.images import MAX_IMAGE_BYTES
 from nemo.core.memory import MemoryDraft
 from nemo.core.contracts.types import Message
 from nemo.server.errors import (
@@ -76,7 +77,7 @@ def create_app(
             if owned_service:
                 await agent_service.shutdown()
 
-    app = FastAPI(title="Nemo Server", version="0.2.0", lifespan=lifespan)
+    app = FastAPI(title="Nemo Server", version="0.3.0", lifespan=lifespan)
     if desktop_token is not None:
         install_desktop_access(app, desktop_token)
 
@@ -373,6 +374,35 @@ def create_app(
         except OSError:
             raise HTTPException(status_code=500, detail="could not save configuration") from None
 
+    @app.post("/sessions/{session_id}/images", status_code=201)
+    async def upload_image(session_id: str, request: Request) -> dict:
+        try:
+            agent_service.sessions.require_row(session_id)
+            data = bytearray()
+            async for chunk in request.stream():
+                if len(data) + len(chunk) > MAX_IMAGE_BYTES:
+                    raise HTTPException(status_code=413, detail="Image exceeds the 10 MiB limit")
+                data.extend(chunk)
+            mime_type = request.headers.get("content-type", "").split(";", 1)[0].strip()
+            ref = await asyncio.to_thread(agent_service.upload_image, session_id, bytes(data), mime_type)
+            return ref.model_dump(mode="json")
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=422, detail=exc.public_message) from None
+
+    @app.get("/sessions/{session_id}/images/{asset_id}")
+    async def get_image(session_id: str, asset_id: str) -> Response:
+        try:
+            image = await asyncio.to_thread(agent_service.get_image, session_id, asset_id)
+            return Response(image.data, media_type=image.ref.mime_type, headers={
+                "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+            })
+        except SessionNotFoundError:
+            raise HTTPException(status_code=404, detail="session not found") from None
+        except ToolFailure as exc:
+            raise HTTPException(status_code=404, detail=exc.public_message) from None
+
     @app.post(
         "/sessions/{session_id}/runs",
         response_model=RunResponse,
@@ -381,11 +411,11 @@ def create_app(
     async def create_run(session_id: str, body: CreateRunRequest) -> dict:
         try:
             return agent_service.start_run(
-                session_id, prompt=body.prompt, max_steps=body.max_steps
+                session_id, prompt=body.prompt, images=body.images, max_steps=body.max_steps
             )
         except SessionNotFoundError:
             raise HTTPException(status_code=404, detail="session not found") from None
-        except ToolFailure as exc:
+        except (ToolFailure, CapabilityError, ConfigError) as exc:
             raise HTTPException(status_code=422, detail=exc.public_message) from None
         except ActiveRunError:
             raise HTTPException(

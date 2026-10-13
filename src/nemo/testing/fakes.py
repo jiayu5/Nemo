@@ -258,9 +258,10 @@ class FakeMcpSession:
 
 def empty_mcp_tools(workspace):
     from contextlib import asynccontextmanager
+    from nemo.core.contracts.mcp import McpToolSet
     @asynccontextmanager
     async def scope():
-        yield ()
+        yield McpToolSet()
     return scope()
 
 

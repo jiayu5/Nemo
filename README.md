@@ -1,10 +1,10 @@
 # Nemo
 
-Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯、Skills 与异步并行只读 Subagents。
+Nemo 是一个从底层实现的个人 Agent Runtime 与 Agent OS 实验平台。它已经具备真实模型接入、本地文件与 Shell 工具、Web 工具、会话持久化、HTTP/SSE Server、CLI、审批、Trace、React UI、会话上下文压缩、工作区文本检索、用户/项目记忆与历史会话追溯、Skills、异步并行只读 Subagents、MCP 外部工具与图片输入。
 
-Phase 1 的单 Agent 闭环与 Phase 2 的 M7–M9 已交付；M2 的其他协议适配仍未完成，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
+Phase 1 的单 Agent 闭环与 Phase 2 的 M7–M9 已交付；Phase 3 的 M10–M12 与 M14 已交付，M2 的其他协议适配仍未完成，包含可打包的 **Nemo.app**。完整状态见 [文档索引](docs/README.md)，系统边界见 [架构文档](NEMO_ARCHITECTURE.md)。
 
-macOS Apple Silicon 可从 [GitHub Release](https://github.com/jiayu5/Nemo/releases/latest) 下载打包应用；当前版本为 `v0.2.0`。
+macOS Apple Silicon 可从 [GitHub Release](https://github.com/jiayu5/Nemo/releases/latest) 下载打包应用；当前版本为 `v0.3.0`。
 
 ## 快速开始
 
@@ -72,6 +72,8 @@ open apps/ui/src-tauri/target/release/bundle/macos/Nemo.app
 - 配置驱动的 Provider、Model、Alias 和 Profile；选择优先级为 `run > session > agent > default`。
 - `openai_compatible` 协议和 Tool Calling；其他协议名称已预留，但适配器尚未实现。
 - 本地文件、Shell、Web、工作区检索、长期记忆与历史会话与 Skills 工具；可用范围见 [架构文档](NEMO_ARCHITECTURE.md#tool)。
+- MCP 外部工具连接：本地 stdio 与远程 Streamable HTTP、工具发现、只读与子 Agent 白名单、浏览器账号授权；连接是可选增强，未就绪或失败的连接只会跳过并记录事件，不会拦住 Run。
+- 图片输入：Session 内上传、随请求发送给支持视觉的模型、历史与压缩保留；Nemo 不提供图像生成工具，见 [图片输入参考](docs/reference/images.md)。
 - `ask`、`auto`、`full` 三档审批；`auto` 依赖启发式规则，不是沙箱。
 - Session/Run、消息、事件、步骤、工具调用和模型身份持久化。
 - SSE 领域事件、取消、审批回传、断线续读和 Run Trace。

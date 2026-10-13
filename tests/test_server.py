@@ -109,7 +109,52 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(sdk.closed)
         self.assertTrue(any(e.type == "tool.completed" and e.payload["name"] == "mcp_demo_add" for e in service.events_after(run["run_id"],0)))
 
+    async def test_run_continues_when_mcp_connections_are_skipped(self):
+        from contextlib import asynccontextmanager
+        from nemo.core.contracts.mcp import McpToolSet, SkippedConnection
+
+        @asynccontextmanager
+        async def factory(workspace):
+            yield McpToolSet(skipped=(SkippedConnection(server_id="Github",
+                reason="MCP account needs authorization; connect it in MCP settings"),))
+
+        model = FakeModel([ModelResponse(content="ok")])
+        service = NemoApplication(SQLiteRepository(self.root / "mcp-skip.sqlite"),
+                                  client_factory=lambda **_: model, mcp_tools_factory=factory)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.FULL)
+        run = service.start_run(session["session_id"], prompt="Hello", max_steps=2)
+        result = await self.wait_terminal(service, run["run_id"])
+        self.assertEqual(result["status"], "completed")
+        self.assertEqual(result["output"], "ok")
+        skipped = [event for event in service.events_after(run["run_id"], 0)
+                   if event.type == EventType.MCP_CONNECTION_SKIPPED]
+        self.assertEqual([(item.payload["server_id"], item.payload["reason"]) for item in skipped],
+                         [("Github", "MCP account needs authorization; connect it in MCP settings")])
+
+    async def test_unexpected_mcp_failure_does_not_fail_the_run(self):
+        from contextlib import asynccontextmanager
+
+        @asynccontextmanager
+        async def factory(workspace):
+            raise RuntimeError("private MCP internals")
+            yield ()
+
+        model = FakeModel([ModelResponse(content="ok")])
+        service = NemoApplication(SQLiteRepository(self.root / "mcp-broken.sqlite"),
+                                  client_factory=lambda **_: model, mcp_tools_factory=factory)
+        self.services.append(service)
+        session = service.create_session(workspace=str(self.root), model=None, approval_mode=ApprovalMode.FULL)
+        run = service.start_run(session["session_id"], prompt="Hello", max_steps=2)
+        result = await self.wait_terminal(service, run["run_id"])
+        self.assertEqual(result["status"], "completed")
+        skipped = [event for event in service.events_after(run["run_id"], 0)
+                   if event.type == EventType.MCP_CONNECTION_SKIPPED]
+        self.assertEqual([(item.payload["server_id"], item.payload["reason"]) for item in skipped],
+                         [(None, "MCP tools were unavailable for this run")])
+
     async def test_cancel_during_mcp_discovery_cleans_up_before_terminal_without_model_calls(self):
+        from contextlib import asynccontextmanager
         from contextlib import asynccontextmanager
         from nemo.adapters.mcp import McpConnection
         from nemo.core.contracts.mcp import McpServerConfig

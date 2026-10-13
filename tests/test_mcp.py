@@ -20,6 +20,68 @@ from nemo.testing.fakes import FakeMcpSession, FakeModel
 
 
 class McpTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unready_account_is_skipped_without_connecting(self):
+        from nemo.adapters.mcp import connect_tools
+        from nemo.core.contracts.mcp import McpServerConfig
+        opened = []
+
+        def factory(**kwargs):
+            opened.append(kwargs)
+            raise RuntimeError("transport reached")
+
+        class OAuth:
+            def __init__(self, status):
+                self.current = status
+
+            def status(self, server_id, config):
+                return {"status": self.current}
+
+            def provider(self, server_id, config, **kwargs):
+                return None
+
+        servers = {
+            "remote": McpServerConfig(transport="streamable_http", url="https://oauth.test/mcp",
+                                      auth_mode="oauth", enabled=True),
+            "off": McpServerConfig(transport="streamable_http", url="https://oauth.test/mcp",
+                                   auth_mode="oauth", enabled=False),
+        }
+        for state, expected in [("not_connected", "connect it in MCP settings"),
+                                ("needs_authorization", "connect it in MCP settings"),
+                                ("authorizing", "sign-in is still in progress")]:
+            with self.subTest(state=state):
+                async with connect_tools(servers, Path.cwd(), oauth_manager=OAuth(state),
+                                         http_client_factory=factory) as toolset:
+                    self.assertEqual(toolset.tools, ())
+                    self.assertEqual([item.server_id for item in toolset.skipped], ["remote"])
+                    self.assertIn(expected, toolset.skipped[0].reason)
+        # A connection without a saved account token never reaches the transport.
+        self.assertEqual(opened, [])
+        async with connect_tools(servers, Path.cwd(), oauth_manager=OAuth("connected"),
+                                 http_client_factory=factory) as toolset:
+            self.assertEqual(toolset.tools, ())
+        self.assertEqual(len(opened), 1)  # The signed-in connection does attempt to start.
+
+    async def test_unreachable_connection_is_reported_instead_of_failing(self):
+        import httpx
+        from nemo.adapters.mcp import connect_tools
+        from nemo.core.contracts.mcp import McpServerConfig
+
+        def fail(request):
+            raise httpx.ConnectTimeout("private transport diagnostic with credentials", request=request)
+
+        def factory(**kwargs):
+            return McpHttpClient(transport=httpx.MockTransport(fail), **kwargs)
+
+        servers = {
+            "broken": McpServerConfig(transport="streamable_http", url="https://example.test/mcp", enabled=True),
+            "off": McpServerConfig(command="unused", enabled=False),
+        }
+        async with connect_tools(servers, Path.cwd(), http_client_factory=factory) as toolset:
+            self.assertEqual(toolset.tools, ())
+            self.assertEqual([item.server_id for item in toolset.skipped], ["broken"])
+            self.assertIn("proxy environment variable", toolset.skipped[0].reason)
+            self.assertNotIn("private", toolset.skipped[0].reason)
+
     async def test_transport_failure_survives_sdk_writer_error_masking(self):
         import httpx
         def fail(request):

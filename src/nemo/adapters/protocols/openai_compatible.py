@@ -5,6 +5,8 @@ Covers any service that speaks ``POST {base_url}/chat/completions`` with
 """
 
 import json
+import base64
+from collections.abc import Callable
 from collections.abc import AsyncIterator
 from typing import Any
 
@@ -12,6 +14,8 @@ from pydantic import ValidationError
 
 from nemo.core.context.reminder import REMINDER_CLOSE, REMINDER_OPEN
 from nemo.core.contracts.errors import NemoError, ProviderError, ResponseFormatError
+from nemo.core.contracts.errors import CapabilityError, ToolFailure
+from nemo.core.contracts.images import ImageData, MAX_REQUEST_IMAGE_BYTES
 from nemo.core.contracts.model_config import ResolvedModel
 from nemo.core.contracts.model_transport import EncodedRequest, HttpResponse
 from nemo.core.contracts.secrets import SecretValue
@@ -32,6 +36,9 @@ _MAX_ERROR_DETAIL = 300
 class OpenAICompatibleAdapter:
     protocol = "openai_compatible"
 
+    def __init__(self, image_loader: Callable[[str], ImageData] | None = None):
+        self.image_loader = image_loader
+
     def encode_request(
         self, request: ModelRequest, resolved: ResolvedModel, secret: SecretValue
     ) -> EncodedRequest:
@@ -45,6 +52,25 @@ class OpenAICompatibleAdapter:
             "messages": [_encode_message(message, include_reasoning=index > last_user)
                          for index, message in enumerate(request.messages)],
         }
+        total_bytes = 0
+        for message, encoded in zip(request.messages, body["messages"]):
+            if not message.images:
+                continue
+            if "image_input" not in resolved.capabilities or self.image_loader is None:
+                raise CapabilityError("Image input requires a capable model and session image storage")
+            parts = [{"type": "text", "text": message.content}] if message.content else []
+            for ref in message.images:
+                total_bytes += ref.size_bytes
+                if total_bytes > MAX_REQUEST_IMAGE_BYTES:
+                    raise ToolFailure("Request images exceed the 20 MiB limit")
+                image = self.image_loader(ref.asset_id)
+                if image.ref != ref:
+                    raise ToolFailure("Image reference does not match stored content")
+                data = base64.b64encode(image.data).decode("ascii")
+                parts.append({"type": "image_url", "image_url": {
+                    "url": f"data:{ref.mime_type};base64,{data}", "detail": "auto",
+                }})
+            encoded["content"] = parts
         if request.tools:
             body["tools"] = [
                 {

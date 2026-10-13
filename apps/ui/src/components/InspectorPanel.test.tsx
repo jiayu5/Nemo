@@ -38,3 +38,16 @@ it("shows a resumed child queued with its cumulative step count", () => {
   ]} />);
   expect(screen.getByText("queued · step 20 · round 2")).toBeVisible();
 });
+
+it("names a skipped MCP connection and its reason", () => {
+  const skipped = (seq: number, serverId: string | null): RunEvent => ({
+    run_id: "parent", seq, step: 0, type: "mcp.connection_skipped", timestamp: "",
+    payload: { server_id: serverId, reason: "MCP account needs authorization; connect it in MCP settings" },
+  });
+  render(<InspectorPanel runs={[]} trace={null} onSelectRun={() => {}} events={[
+    skipped(1, "Github"), skipped(2, null),
+  ]} />);
+  expect(screen.getByText(/MCP Github not loaded/)).toBeVisible();
+  expect(screen.getByText(/MCP tools not loaded/)).toBeVisible();
+  expect(screen.getAllByText(/connect it in MCP settings/)).toHaveLength(2);
+});

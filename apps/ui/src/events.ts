@@ -19,6 +19,7 @@ export const RUN_EVENT_TYPES = [
   "tool.failed",
   "approval.requested",
   "approval.resolved",
+  "mcp.connection_skipped",
   "observer.failed",
   "subagent.event",
 ] as const;

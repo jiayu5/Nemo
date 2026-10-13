@@ -1,6 +1,6 @@
 # Nemo 架构
 
-> 当前状态：Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 的 Run 内并行只读协作与续轮已交付，M12 MCP 的外部工具连接与浏览器账号授权已交付。权威交付状态见 [文档索引](docs/README.md#当前状态)。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
+> 当前状态：Phase 1 单 Agent 闭环与 Phase 2 已交付；M2 其他协议适配仍未完成。Phase 3 的 M10 Skills 已实现，M11 Subagents 的 Run 内并行只读协作与续轮已交付，M12 MCP 的外部工具连接与浏览器账号授权已交付，M14 图片输入已交付。权威交付状态见 [文档索引](docs/README.md#当前状态)。桌面、Web、CLI 三个客户端都通过同一 Server 使用 Runtime。
 
 Nemo 是可日常使用的个人 Agent，也是从底层研究 Agent Runtime、Context、Memory 和多 Agent 协作的实验平台。基础设施采用成熟库，Agent Loop 与核心智能机制自行实现。
 
@@ -208,7 +208,7 @@ flowchart LR
 - **M9 已实现**：用户与项目文件记忆、按需召回、来源会话追溯和管理界面；尚无后台提炼与 embedding。
 - **Phase 3**：加入 Orchestrator、Subagents、Skills、MCP、Sandbox、Planning、Automation 和完整 Permission Engine。
 
-Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。M11 Subagents 已实现异步并行只读分派，机制见 [Subagents 设计](docs/design/subagents.md)；M12 MCP 已交付外部工具连接与 HTTP 浏览器账号授权，机制见 [MCP 设计](docs/design/mcp.md)；其他能力尚未排定里程碑。
+Phase 3 首个交付为 M10 Skills，机制见 [Skills 设计](docs/design/skills.md)。M11 Subagents 已实现异步并行只读分派，机制见 [Subagents 设计](docs/design/subagents.md)；M12 MCP 已交付外部工具连接与 HTTP 浏览器账号授权，机制见 [MCP 设计](docs/design/mcp.md)；M14 已交付图片输入，模型可以看图但 Nemo 不提供图像生成工具，见 [图片输入参考](docs/reference/images.md)；其他能力尚未排定里程碑。
 
 Subagent 复用同一个 Runtime，拥有独立状态、上下文、只读工具集合和步数/时间限制；父 Run 管理并行生命周期、查询/等待/取消及共享调用预算；子任务预留预算内的最后一步返回部分报告，最终报告可分页读取，父 Agent 可在同一 Run 内为已结束的子任务续轮并回读各轮报告，UI 基于父事件流的分块报告按轮还原全文并查看独立执行详情；MCP 工具通过 Tool Registry 接入；Memory 通过 Context Engine 选择后进入单次模型请求。
 
@@ -230,6 +230,7 @@ M11 的子任务步数默认值、上限和父子共享模型调用预算现已�
 | M10 · Skills | 已完成 | 本地技能目录、按需加载、恢复刷新、管理 UI、内置 Skill Creator/Installer（复用 Codex）、正文分页、兼容导入 API 与既有工具审批 |
 | M11 · Subagents | 已完成 | Run 内并行只读协作、上下文续轮、共享预算与按轮报告 |
 | M12 · MCP | 已交付；第三方账号最终验收未完成 | stdio / Streamable HTTP、外部工具、审批、子任务白名单、浏览器授权与管理界面 |
+| M14 · Image Input | 已完成 | Session 内图片上传与存储、多模态请求编码、历史与压缩保留、附件交互与历史图片展示 |
 
 Phase 1 的完成标准是：用户从 Nemo.app 配置 Provider、选择模型、提交任务、审批工具、查看 Trace 并得到结果；CLI 可完成同等闭环。Phase 1 不包含长期 Memory、Skills、MCP、Subagents、Browser/Computer Use、操作系统 Sandbox 或 Automation。
 

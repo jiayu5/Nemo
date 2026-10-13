@@ -11,6 +11,8 @@ import type {
 } from "../types";
 import { Composer } from "./Composer";
 import { useFollowScroll } from "../hooks/useFollowScroll";
+import { MessageImages } from "./MessageImages";
+import type { ImageRef } from "../types";
 
 interface Props {
   selected: Session | null;
@@ -27,6 +29,11 @@ interface Props {
   onApproval: (outcome: "allow_once" | "allow_session" | "deny") => void;
   onModeChange: (mode: ApprovalMode) => void;
   onModelChange: (model: string) => void;
+  images?: ImageRef[];
+  uploading?: boolean;
+  submitting?: boolean;
+  onAddImages?: (files: File[]) => void;
+  onRemoveImage?: (index: number) => void;
 }
 
 function roleLabel(message: Message) {
@@ -155,6 +162,7 @@ function TurnSteps({ steps }: { steps: TurnStep[] }) {
 export function Conversation({
   selected, messages, liveText, liveReasoning, models, activeRun, approval, prompt, onPromptChange, onSubmit,
   onStop, onApproval, onModeChange, onModelChange,
+  images, uploading, submitting, onAddImages, onRemoveImage,
 }: Props) {
   const scroll = useFollowScroll(selected?.session_id ?? null, [messages, liveText, liveReasoning]);
   const items = buildItems(messages);
@@ -175,6 +183,8 @@ export function Conversation({
           item.kind === "message" ? (
             <article className={`message ${item.message.role}`} key={item.key}>
               <span className="role">{roleLabel(item.message)}</span>
+              {selected && Boolean(item.message.images?.length) &&
+                <MessageImages sessionId={selected.session_id} images={item.message.images ?? []} />}
               <div className="message-content">
                 <Markdown remarkPlugins={[remarkGfm]}>{item.message.content}</Markdown>
               </div>
@@ -246,6 +256,8 @@ export function Conversation({
         onStop={onStop}
         onModeChange={onModeChange}
         onModelChange={onModelChange}
+        images={images} uploading={uploading} submitting={submitting}
+        onAddImages={onAddImages} onRemoveImage={onRemoveImage}
       />
     </section>
   );

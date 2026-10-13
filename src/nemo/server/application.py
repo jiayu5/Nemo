@@ -11,6 +11,8 @@ from nemo.config.loader import load_config
 from nemo.config.editor import ConfigEditor
 from nemo.config.secrets import SecretLoader
 from nemo.core.contracts.types import Event, Message
+from nemo.core.contracts.images import ImageStore
+from nemo.core.contracts.errors import ToolFailure
 from nemo.core.tools.approval import ApprovalMode, ApprovalOutcome
 from nemo.server.catalog import CatalogService
 from nemo.server.memory import MemoryService
@@ -39,8 +41,10 @@ class NemoApplication:
         mcp_tools_factory=None,
         mcp_probe=None,
         mcp_oauth=None,
+        image_store: ImageStore | None = None,
     ) -> None:
         self.repository = repository
+        self.image_store = image_store
         from nemo.server.mcp import McpService
         self.mcp = McpService(config_editor or ConfigEditor(), probe=mcp_probe, oauth=mcp_oauth)
         self.memory_store = memory_store
@@ -63,6 +67,7 @@ class NemoApplication:
             approval_timeout_seconds=approval_timeout_seconds,
             config_loader=config_loader,
             mcp_tools_factory=mcp_tools_factory,
+            image_store=image_store,
         )
         self.traces = TraceService(repository)
         self.settings = SettingsService(config_editor or ConfigEditor())
@@ -137,10 +142,29 @@ class NemoApplication:
         return self.settings.delete(provider_id)
 
     def start_run(
-        self, session_id: str, *, prompt: str, max_steps: int
+        self, session_id: str, *, prompt: str, max_steps: int, images: list[str] | None = None,
     ) -> dict[str, Any]:
         session = self.sessions.require_row(session_id)
-        return self.runs.start(session, prompt=prompt, max_steps=max_steps)
+        images = images or []
+        if not prompt.strip() and not images:
+            raise ToolFailure("A message requires text or images")
+        if len(images) > 8:
+            raise ToolFailure("A message supports at most 8 images")
+        refs = tuple(self.require_image_store().get(session_id, asset_id).ref for asset_id in images)
+        return self.runs.start(session, prompt=prompt, max_steps=max_steps, images=refs)
+
+    def require_image_store(self) -> ImageStore:
+        if self.image_store is None:
+            raise ToolFailure("Image storage is not configured")
+        return self.image_store
+
+    def upload_image(self, session_id: str, data: bytes, mime_type: str):
+        self.sessions.require_row(session_id)
+        return self.require_image_store().put(session_id, data, mime_type)
+
+    def get_image(self, session_id: str, asset_id: str):
+        self.sessions.require_row(session_id)
+        return self.require_image_store().get(session_id, asset_id)
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         return self.runs.get(run_id)

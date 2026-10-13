@@ -732,3 +732,8 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, select:focus-
   .mcp-field-pair { grid-template-columns: 1fr; }
   .mcp-footer { padding: 14px 18px; }
 }
+.message-images { display: flex; flex-wrap: wrap; gap: 10px; margin: 8px 0; }
+.message-images img { display: block; max-width: 220px; max-height: 180px; object-fit: contain; border-radius: 8px; }
+.composer-attachments .message-images img { max-width: 110px; max-height: 80px; }
+.composer-attachments { padding: 8px 14px; }
+.attachment-actions { display: flex; flex-wrap: wrap; gap: 8px; }
